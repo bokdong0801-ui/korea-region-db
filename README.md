@@ -14,24 +14,51 @@
 6. 좌표와 상하위/인접/중첩 관계
 7. CSV / JSON / MySQL / SQL INSERT / 페이지 생성용 데이터 export
 
-## 현재 단계
+## 현재 상태
 
-Phase 0~2: 전국 공식 행정구역 Master DB V1 구축
+**Korea Region Master DB V1.0.0 완료 (2026-09-14)**
 
-- 법정동: 행정표준코드관리시스템 전체자료(현존+폐지)
-- 행정동: 행정안전부 주민등록주소코드 자료
-- 행정동↔법정동: 행정안전부 KiKmix 자료
-- 폐지지역은 삭제하지 않고 status/history로 보존
+- 고정 브랜치: `release/v1.0.0`
+- 릴리스 기록: `releases/V1.0.0.md`
+- Code.go 법정동 전체자료 실제 병합: 53,387건
+- MOIS 행정지역: 9,609건
+- MOIS 법정지역: 53,391건
+- 행정↔법정 원천 관계: 58,942건
+- Master places: 63,023건
+- Master relations: 121,893건
+- 감사 예외 관계: 12건
+- unresolved relations: **0건**
+- aliases: 53,361건
+- place_history: 101,506건
+
+Code.go와 MOIS가 충돌하는 값은 삭제하거나 임의 보정하지 않고 `source_discrepancies.csv`에 보존합니다. V1 기준 71건이 기록되어 있습니다.
+
+## 원천 정책
+
+- **Code.go**: 법정지역 identity / name / current-abolished status의 우선 원천
+- **MOIS jscode**: 행정지역, 행정↔법정 매핑, 생성·말소일의 우선 원천
+- 폐지지역은 삭제하지 않고 status/history로 영구 보존
+- 이름 유사도만으로 과거 지역의 successor를 추정하지 않음
 
 ## 디렉터리
 
 - `data/raw/` 원본 자료(가능하면 무수정 보존)
 - `data/normalized/` 정규화 CSV
 - `data/exports/` JSON/SQL 등 배포 산출물
+- `data/rules/` 공식 원천 예외 및 감사 규칙
 - `sources/` 공식 출처·스냅샷 메타데이터
 - `sql/` DB 스키마
 - `scripts/` 수집·정규화·검증 스크립트
 - `docs/` 데이터 모델 및 운영 규칙
+- `releases/` 고정 릴리스 기록
+
+## 다음 단계
+
+1. 전국 철도·도시철도 역 DB
+2. 신도시·택지개발·도시개발·공공주택지구 DB
+3. 자연마을·생활권·통칭지역 DB
+4. 좌표 및 인접/중첩 관계
+5. 지역 페이지 생성용 JSON / slug registry
 
 ## 핵심 원칙
 
