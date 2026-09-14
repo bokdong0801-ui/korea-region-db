@@ -1,269 +1,120 @@
 #!/usr/bin/env python3
-"""Import extracted MOIS jscode files (KiKcd_H / KiKcd_B / KiKmix).
+"""Normalize MOIS jscode Excel files (KiKcd_H / KiKcd_B / KiKmix).
 
-MOIS publishes both fixed-width TEXT and Excel versions. For reliability this
-importer prefers the official XLSX files and falls back to delimited text only.
-The original fixed-width TEXT is still preserved by the sync workflow for audit.
-
-Usage:
-  python scripts/import_mois_jscode.py data/raw/jscode20260720_extracted \
-      --snapshot-date 2026-07-20 --out-dir data/normalized
+The official archive contains both fixed-width TEXT and XLSX. XLSX is preferred
+for normalization; the raw archive remains the audit source.
 """
-
 from __future__ import annotations
 
-import argparse
-import csv
-import json
-import re
+import argparse, csv, json, re
 from pathlib import Path
 from typing import Any
-
-ENCODINGS = ("utf-8-sig", "cp949", "euc-kr", "utf-8")
-
-
-def decode(path: Path) -> str:
-    raw = path.read_bytes()
-    for enc in ENCODINGS:
-        try:
-            return raw.decode(enc)
-        except UnicodeDecodeError:
-            pass
-    raise UnicodeError(f"cannot decode: {path}")
+from openpyxl import load_workbook
 
 
-def find_one(root: Path, prefix: str) -> Path:
-    found = [p for p in root.rglob("*") if p.is_file() and p.name.lower().startswith(prefix.lower())]
-    # Prefer the official spreadsheet; it exposes explicit columns while the
-    # companion TEXT file is fixed-width.
-    found.sort(key=lambda p: (0 if p.suffix.lower() == ".xlsx" else 1, len(p.name)))
-    if not found:
-        raise FileNotFoundError(f"{prefix} 파일을 찾지 못했습니다: {root}")
-    return found[0]
+def s(v: Any) -> str:
+    if v is None: return ""
+    if isinstance(v, float) and v.is_integer(): return str(int(v))
+    return str(v).strip()
 
 
-def cell_str(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value).strip()
+def date8(v: Any) -> str:
+    x = re.sub(r"\D", "", s(v))
+    return f"{x[:4]}-{x[4:6]}-{x[6:8]}" if len(x) == 8 else ""
 
 
-def parse_xlsx(path: Path) -> tuple[list[str], list[dict[str, str]]]:
-    try:
-        from openpyxl import load_workbook
-    except ImportError as exc:
-        raise RuntimeError("XLSX import requires openpyxl: pip install openpyxl") from exc
+def status_from_end(v: Any) -> str:
+    return "ABOLISHED" if date8(v) else "CURRENT"
 
+
+def find_xlsx(root: Path, prefix: str) -> Path:
+    matches = sorted(p for p in root.rglob("*.xlsx") if p.name.lower().startswith(prefix.lower()))
+    if not matches: raise FileNotFoundError(prefix)
+    return matches[0]
+
+
+def read_xlsx(path: Path) -> tuple[list[str], list[dict[str,str]]]:
     wb = load_workbook(path, read_only=True, data_only=True)
     ws = wb[wb.sheetnames[0]]
-
-    raw_rows = list(ws.iter_rows(values_only=True))
-    if not raw_rows:
-        raise ValueError(f"empty workbook: {path}")
-
-    # Find the first plausible header row. Recent MOIS spreadsheets place the
-    # field names near the top, but this also tolerates title/blank rows.
-    header_idx = None
-    headers: list[str] = []
-    for idx, row in enumerate(raw_rows[:30]):
-        vals = [cell_str(v) for v in row]
-        nonempty = [v for v in vals if v]
-        joined = " ".join(nonempty)
-        if len(nonempty) >= 2 and any(token in joined for token in ("코드", "기관", "법정", "행정", "시도")):
-            header_idx = idx
-            headers = vals
-            break
-    if header_idx is None:
-        raise ValueError(f"header row not found in workbook: {path}")
-
-    # Excel occasionally has blank header cells. Give them stable placeholder
-    # names so Dict rows remain structurally intact.
-    clean_headers: list[str] = []
-    used: dict[str, int] = {}
-    for i, h in enumerate(headers):
-        name = h or f"__col_{i+1}"
-        used[name] = used.get(name, 0) + 1
-        if used[name] > 1:
-            name = f"{name}_{used[name]}"
-        clean_headers.append(name)
-
-    rows: list[dict[str, str]] = []
-    for raw in raw_rows[header_idx + 1:]:
-        vals = [cell_str(v) for v in raw]
-        if not any(vals):
-            continue
-        vals += [""] * max(0, len(clean_headers) - len(vals))
-        rows.append(dict(zip(clean_headers, vals[:len(clean_headers)])))
-    return clean_headers, rows
+    it = ws.iter_rows(values_only=True)
+    headers = [s(v) for v in next(it)]
+    rows=[]
+    for raw in it:
+        vals=[s(v) for v in raw]
+        if not any(vals): continue
+        vals += [""] * (len(headers)-len(vals))
+        rows.append(dict(zip(headers, vals)))
+    return headers, rows
 
 
-def parse_text_table(path: Path) -> tuple[list[str], list[dict[str, str]]]:
-    text = decode(path)
-    lines = [line for line in text.splitlines() if line.strip()]
-    if not lines:
-        raise ValueError(f"empty file: {path}")
-    first = lines[0]
-    delimiter = "\t" if "\t" in first else "," if "," in first else "|" if "|" in first else None
-    if delimiter is None:
-        raise ValueError(
-            f"fixed-width text detected: {path}. Use the companion XLSX file or implement the official layout."
-        )
-    r = csv.DictReader(lines, delimiter=delimiter)
-    if not r.fieldnames:
-        raise ValueError(f"header missing: {path}")
-    return list(r.fieldnames), [{k: (v or "").strip() for k, v in row.items()} for row in r]
+def join_name(*parts: str) -> str:
+    return " ".join(p.strip() for p in parts if p and p.strip())
 
 
-def parse_table(path: Path) -> tuple[list[str], list[dict[str, str]]]:
-    if path.suffix.lower() == ".xlsx":
-        return parse_xlsx(path)
-    return parse_text_table(path)
+def legal_type(code: str, emd: str) -> tuple[int,str]:
+    if code[2:] == "00000000": return 1, "SIDO"
+    if code[5:] == "00000": return 2, "SIGUNGU"
+    if code[8:] == "00":
+        if emd.endswith("읍"): return 3, "LEGAL_EUP"
+        if emd.endswith("면"): return 3, "LEGAL_MYEON"
+        return 3, "LEGAL_DONG"
+    return 4, "LEGAL_RI"
 
 
-def norm(s: str) -> str:
-    return re.sub(r"[\s_()·./-]+", "", (s or "").strip()).lower()
+def admin_type(code: str, emd: str) -> tuple[int,str]:
+    if code[2:] == "00000000": return 1, "ADMIN_SIDO"
+    if code[5:] == "00000": return 2, "ADMIN_SIGUNGU"
+    if emd.endswith("읍"): return 3, "ADMIN_EUP"
+    if emd.endswith("면"): return 3, "ADMIN_MYEON"
+    return 3, "ADMIN_DONG"
 
 
-def choose(headers: list[str], candidates: tuple[str, ...], required: bool = True) -> str | None:
-    nh = {norm(h): h for h in headers}
-    for c in candidates:
-        c0 = norm(c)
-        if c0 in nh:
-            return nh[c0]
-    for c in sorted(candidates, key=len, reverse=True):
-        c0 = norm(c)
-        for k, original in nh.items():
-            if c0 and c0 in k:
-                return original
-    if required:
-        raise KeyError(f"column not found. candidates={candidates}, headers={headers}")
-    return None
+def parent_code(code: str, level: int) -> str:
+    if level == 1: return ""
+    if level == 2: return code[:2] + "00000000"
+    if level == 3: return code[:5] + "00000"
+    if level == 4: return code[:8] + "00"
+    raise ValueError(level)
 
 
-def status(value: str) -> str:
-    v = norm(value)
-    if not v:
-        return "CURRENT"
-    if any(x in v for x in ("폐지", "말소", "삭제")) or v in {"1", "y", "yes", "true", "폐지1"}:
-        return "ABOLISHED"
-    return "CURRENT"
-
-
-def digits(value: str) -> str:
-    # Excel may render codes as `1100000000.0`; normalize safely.
-    v = value.strip()
-    if re.fullmatch(r"\d+\.0", v):
-        v = v[:-2]
-    return re.sub(r"\D", "", v)
-
-
-def infer_admin_type(name: str) -> str:
-    return "ADMIN_DONG"
-
-
-def main() -> None:
-    ap = argparse.ArgumentParser()
+def main():
+    ap=argparse.ArgumentParser()
     ap.add_argument("extracted_dir", type=Path)
     ap.add_argument("--snapshot-date", required=True)
     ap.add_argument("--out-dir", type=Path, default=Path("data/normalized"))
-    args = ap.parse_args()
+    a=ap.parse_args(); a.out_dir.mkdir(parents=True, exist_ok=True)
 
-    hfile = find_one(args.extracted_dir, "KiKcd_H")
-    bfile = find_one(args.extracted_dir, "KiKcd_B")
-    mfile = find_one(args.extracted_dir, "KiKmix")
+    hp=find_xlsx(a.extracted_dir,"KIKcd_H"); bp=find_xlsx(a.extracted_dir,"KIKcd_B"); mp=find_xlsx(a.extracted_dir,"KIKmix")
+    hh,hr=read_xlsx(hp); bh,br=read_xlsx(bp); mh,mr=read_xlsx(mp)
 
-    h_headers, h_rows = parse_table(hfile)
-    b_headers, b_rows = parse_table(bfile)
-    m_headers, m_rows = parse_table(mfile)
+    admin=[]
+    for r in hr:
+        code=re.sub(r"\D","",r.get("행정동코드","")); sido=r.get("시도명",""); sgg=r.get("시군구명",""); emd=r.get("읍면동명","")
+        if len(code)!=10: continue
+        level,ptype=admin_type(code,emd); full=join_name(sido,sgg,emd); pc=parent_code(code,level)
+        admin.append({"place_id":f"adm:{code}","place_type":ptype,"hierarchy_level":level,"name_ko":(emd or sgg or sido),"full_name_ko":full,"official_code":code,"parent_place_id":f"adm:{pc}" if pc else "","legal_status":status_from_end(r.get("말소일자")),"valid_from":date8(r.get("생성일자")),"valid_to":date8(r.get("말소일자")),"source_id":"mois_jscode","source_snapshot_date":a.snapshot_date})
 
-    h_code = choose(h_headers, ("행정기관코드", "행정동코드", "기관코드", "행정기관"))
-    h_name = choose(h_headers, ("행정기관명", "행정동명", "기관명", "행정구역명", "행정기관명칭"))
-    h_status = choose(h_headers, ("폐지여부", "말소여부", "폐지구분", "폐지"), required=False)
+    legal=[]
+    for r in br:
+        code=re.sub(r"\D","",r.get("법정동코드","")); sido=r.get("시도명",""); sgg=r.get("시군구명",""); emd=r.get("읍면동명",""); ri=r.get("동리명","")
+        if len(code)!=10: continue
+        level,ptype=legal_type(code,emd); full=join_name(sido,sgg,emd,ri); pc=parent_code(code,level)
+        legal.append({"place_id":f"bjd:{code}","place_type":ptype,"hierarchy_level":level,"name_ko":(ri or emd or sgg or sido),"full_name_ko":full,"official_code":code,"parent_place_id":f"bjd:{pc}" if pc else "","legal_status":status_from_end(r.get("말소일자")),"valid_from":date8(r.get("생성일자")),"valid_to":date8(r.get("말소일자")),"source_id":"mois_jscode","source_snapshot_date":a.snapshot_date})
 
-    b_code = choose(b_headers, ("법정동코드", "법정주소코드", "법정코드", "법정동"))
-    b_name = choose(b_headers, ("법정동명", "법정주소명", "주소명", "법정동명칭"))
-    b_status = choose(b_headers, ("폐지여부", "말소여부", "폐지구분", "폐지"), required=False)
+    relations=[]
+    for r in mr:
+        ac=re.sub(r"\D","",r.get("행정동코드","")); lc=re.sub(r"\D","",r.get("법정동코드",""))
+        if len(ac)!=10 or len(lc)!=10: continue
+        relations.append({"from_place_id":f"adm:{ac}","to_place_id":f"bjd:{lc}","relation_type":"ADMINISTERS","legal_status":status_from_end(r.get("말소일자")),"valid_from":date8(r.get("생성일자")),"valid_to":date8(r.get("말소일자")),"source_id":"mois_jscode","source_snapshot_date":a.snapshot_date})
 
-    m_admin = choose(m_headers, ("행정기관코드", "행정동코드", "기관코드", "행정기관"))
-    m_legal = choose(m_headers, ("법정동코드", "법정주소코드", "법정코드", "법정동"))
-    m_status = choose(m_headers, ("폐지여부", "말소여부", "폐지구분", "폐지"), required=False)
+    def write(name, rows):
+        p=a.out_dir/name
+        with p.open("w",encoding="utf-8-sig",newline="") as f:
+            w=csv.DictWriter(f, fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
+    write("places_admin.csv",admin); write("places_legal_mois.csv",legal); write("relations_admin_legal.csv",relations)
 
-    args.out_dir.mkdir(parents=True, exist_ok=True)
+    meta={"snapshot_date":a.snapshot_date,"files":{"admin":hp.name,"legal":bp.name,"mapping":mp.name},"headers":{"admin":hh,"legal":bh,"mapping":mh},"rows":{"admin":len(admin),"legal":len(legal),"mapping":len(relations)},"current":{"admin":sum(x["legal_status"]=="CURRENT" for x in admin),"legal":sum(x["legal_status"]=="CURRENT" for x in legal),"mapping":sum(x["legal_status"]=="CURRENT" for x in relations)},"abolished":{"admin":sum(x["legal_status"]=="ABOLISHED" for x in admin),"legal":sum(x["legal_status"]=="ABOLISHED" for x in legal),"mapping":sum(x["legal_status"]=="ABOLISHED" for x in relations)}}
+    (a.out_dir/"mois_jscode_import_meta.json").write_text(json.dumps(meta,ensure_ascii=False,indent=2),encoding="utf-8")
+    print(json.dumps(meta,ensure_ascii=False,indent=2))
 
-    admin_out = []
-    for r in h_rows:
-        code = digits(r.get(h_code, ""))
-        name = re.sub(r"\s+", " ", r.get(h_name, "").strip())
-        if not code or not name:
-            continue
-        admin_out.append({
-            "place_id": f"adm:{code}",
-            "place_type": infer_admin_type(name),
-            "name_ko": name.split()[-1],
-            "full_name_ko": name,
-            "official_code": code,
-            "legal_status": status(r.get(h_status, "") if h_status else ""),
-            "source_id": "mois_jscode",
-            "source_snapshot_date": args.snapshot_date,
-        })
-
-    legal_out = []
-    for r in b_rows:
-        code = digits(r.get(b_code, ""))
-        name = re.sub(r"\s+", " ", r.get(b_name, "").strip())
-        if not code or not name:
-            continue
-        legal_out.append({
-            "place_id": f"bjd:{code}",
-            "name_ko": name.split()[-1],
-            "full_name_ko": name,
-            "official_code": code,
-            "legal_status": status(r.get(b_status, "") if b_status else ""),
-            "source_id": "mois_jscode",
-            "source_snapshot_date": args.snapshot_date,
-        })
-
-    relation_out = []
-    for r in m_rows:
-        acode = digits(r.get(m_admin, ""))
-        lcode = digits(r.get(m_legal, ""))
-        if not acode or not lcode:
-            continue
-        relation_out.append({
-            "from_place_id": f"adm:{acode}",
-            "to_place_id": f"bjd:{lcode}",
-            "relation_type": "ADMINISTERS",
-            "legal_status": status(r.get(m_status, "") if m_status else ""),
-            "source_id": "mois_jscode",
-            "source_snapshot_date": args.snapshot_date,
-        })
-
-    def write_csv(name: str, rows: list[dict[str, str]]) -> None:
-        path = args.out_dir / name
-        if not rows:
-            path.write_text("", encoding="utf-8-sig")
-            return
-        with path.open("w", encoding="utf-8-sig", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-            w.writeheader(); w.writerows(rows)
-
-    write_csv("places_admin.csv", admin_out)
-    write_csv("places_legal_mois.csv", legal_out)
-    write_csv("relations_admin_legal.csv", relation_out)
-
-    meta = {
-        "snapshot_date": args.snapshot_date,
-        "files": {"admin": hfile.name, "legal": bfile.name, "mapping": mfile.name},
-        "rows": {"admin": len(admin_out), "legal": len(legal_out), "mapping": len(relation_out)},
-        "headers": {"admin": h_headers, "legal": b_headers, "mapping": m_headers},
-    }
-    (args.out_dir / "mois_jscode_import_meta.json").write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    print(json.dumps(meta, ensure_ascii=False, indent=2))
-
-
-if __name__ == "__main__":
-    main()
+if __name__=="__main__": main()
