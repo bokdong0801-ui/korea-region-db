@@ -1,0 +1,56 @@
+name: Validate Toponym V5 Pipeline
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/validate-toponym-v5-pipeline.yml'
+      - 'scripts/import_ngii_place_names.py'
+      - 'scripts/augment_geo_v5_toponyms.py'
+      - 'scripts/make_v5_test_fixture.py'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  validate-v5-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: python -m pip install --disable-pip-version-check pyshp pyproj
+      - run: mkdir -p /tmp/v4 /tmp/fixture /tmp/toponym /tmp/v5
+      - name: Download audited V4 artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/10355006058/zip" -o /tmp/v4.zip
+          unzip -oq /tmp/v4.zip -d /tmp/v4
+          test -s /tmp/v4/v4/master/places_geo_master.csv
+      - name: Generate deterministic NGII-compatible fixture
+        run: python scripts/make_v5_test_fixture.py --v4-places /tmp/v4/v4/master/places_geo_master.csv --out /tmp/fixture/N3P_H0040000.zip
+      - name: Import exact BJCD relations
+        run: |
+          python scripts/import_ngii_place_names.py /tmp/fixture/N3P_H0040000.zip \
+            --v4-places /tmp/v4/v4/master/places_geo_master.csv \
+            --snapshot-date 2026-09-14 --out-dir /tmp/toponym
+      - name: Overlay onto V4
+        run: python scripts/augment_geo_v5_toponyms.py --v4-dir /tmp/v4/v4/master --toponym-dir /tmp/toponym --out-dir /tmp/v5
+      - name: Pipeline quality gate
+        run: |
+          python - <<'PY'
+          import json,csv
+          i=json.load(open('/tmp/toponym/toponym_import_report.json',encoding='utf-8'))
+          g=json.load(open('/tmp/v5/geo_master_v5_report.json',encoding='utf-8'))
+          assert i['places']==2 and i['relations']==2 and i['unmatched_bjcd']==0 and i['invalid_records']==0, i
+          assert i['villages']==1 and i['by_place_type'].get('NATURAL_TOPONYM')==1, i
+          assert g['base_v4_places']==65469 and g['added_toponyms']==2 and g['unresolved_geo_relations']==0, g
+          with open('/tmp/toponym/toponym_relations.csv',encoding='utf-8-sig',newline='') as f: rel=list(csv.DictReader(f))
+          assert sorted(r['relation_type'] for r in rel)==['TOPONYM_IN','VILLAGE_IN'], rel
+          print('V5 TOPONYM PIPELINE QUALITY GATE PASS')
+          PY
