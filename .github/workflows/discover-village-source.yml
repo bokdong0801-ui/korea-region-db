@@ -22,15 +22,16 @@ jobs:
           curl -fsSL -A 'Mozilla/5.0' "$PAGE" -o /tmp/mafra.html
           echo '=== PAGE BYTES ==='
           wc -c /tmp/mafra.html
-          echo '=== RELEVANT HTML ==='
-          grep -Eoi '.{0,140}(Grid_20160127000000000340_1|file[^" ]*down|download|excel|xls|csv|openapi).{0,220}' /tmp/mafra.html | head -n 120 || true
-          echo '=== SCRIPT SOURCES ==='
-          grep -Eo '<script[^>]+src="[^"]+' /tmp/mafra.html | sed 's/.*src="//' | head -n 80 || true
-          echo '=== SAMPLE XML ==='
-          curl -fsSL --max-time 30 'http://211.237.50.150:7080/openapi/sample/xml/Grid_20160127000000000340_1/1/5' | head -c 4000 || true
+          echo '=== DOWNLOAD FUNCTIONS ==='
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('/tmp/mafra.html').read_text(encoding='utf-8',errors='ignore')
+          for needle in ['function getDataTotal','function getDataCsv','function getDataXls','function filedownload']:
+              i=s.find(needle)
+              print('\n###',needle,'OFFSET',i)
+              if i>=0: print(s[i:i+5000])
+          PY
+          echo '=== SAMPLE XML TOTAL ==='
+          curl -fsSL --max-time 30 'http://211.237.50.150:7080/openapi/sample/xml/Grid_20160127000000000340_1/1/5' | head -c 1200 || true
           echo
-          echo '=== SAMPLE XLS HEADERS ==='
-          curl -fsSL --max-time 30 'http://211.237.50.150:7080/openapi/sample/xls/Grid_20160127000000000340_1/1/5' -o /tmp/sample.xls || true
-          file /tmp/sample.xls || true
-          wc -c /tmp/sample.xls || true
           echo '=== END ==='
