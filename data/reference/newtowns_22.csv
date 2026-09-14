@@ -1,0 +1,23 @@
+place_id,generation,name_ko,aliases,source_id,source_url
+newtown:molit:g1:bundang,1,분당신도시,분당|성남분당|성남 분당신도시,molit_newtown_g1,https://www.molit.go.kr/USR/policyData/m_34681/dtl.jsp?id=523
+newtown:molit:g1:ilsan,1,일산신도시,일산|고양일산|고양 일산신도시,molit_newtown_g1,https://www.molit.go.kr/USR/policyData/m_34681/dtl.jsp?id=523
+newtown:molit:g1:pyeongchon,1,평촌신도시,평촌|안양평촌|안양 평촌신도시,molit_newtown_g1,https://www.molit.go.kr/USR/policyData/m_34681/dtl.jsp?id=523
+newtown:molit:g1:sanbon,1,산본신도시,산본|군포산본|군포 산본신도시,molit_newtown_g1,https://www.molit.go.kr/USR/policyData/m_34681/dtl.jsp?id=523
+newtown:molit:g1:jungdong,1,중동신도시,중동|부천중동|부천 중동신도시,molit_newtown_g1,https://www.molit.go.kr/USR/policyData/m_34681/dtl.jsp?id=523
+newtown:molit:g2:pangyo,2,성남판교신도시,판교|판교신도시|성남판교,molit_newtown_g2,https://www.molit.go.kr/USR/policyData/m_34681/dtl.jsp?id=522
+newtown:molit:g2:dongtan1,2,화성동탄1신도시,동탄1|동탄1신도시|화성동탄1|동탄신도시 1기,molit_newtown_g2,https://www.molit.go.kr/USR/policyData/m_34681/dtl.jsp?id=522
+newtown:molit:g2:dongtan2,2,화성동탄2신도시,동탄2|동탄2신도시|화성동탄2,molit_newtown_g2,https://www.molit.go.kr/USR/policyData/m_34681/dtl.jsp?id=522
+newtown:molit:g2:gimpo-hangang,2,김포한강신도시,김포한강|한강신도시|김포 한강신도시,molit_newtown_g2,https://www.molit.go.kr/USR/policyData/m_34681/dtl.jsp?id=522
+newtown:molit:g2:paju-unjeong,2,파주운정신도시,운정|운정신도시|파주운정,molit_newtown_g2,https://www.molit.go.kr/USR/policyData/m_34681/dtl.jsp?id=522
+newtown:molit:g2:gwanggyo,2,광교신도시,광교|수원광교|광교 신도시,molit_newtown_g2,https://www.molit.go.kr/USR/policyData/m_34681/dtl.jsp?id=522
+newtown:molit:g2:yangju,2,양주신도시,양주|양주옥정회천|옥정회천신도시,molit_newtown_g2,https://www.molit.go.kr/USR/policyData/m_34681/dtl.jsp?id=522
+newtown:molit:g2:wirye,2,위례신도시,위례|위례신도시,molit_newtown_g2,https://www.molit.go.kr/USR/policyData/m_34681/dtl.jsp?id=522
+newtown:molit:g2:pyeongtaek-godeok,2,고덕국제화신도시,고덕국제화|평택고덕|평택고덕신도시|고덕국제신도시,molit_newtown_g2,https://www.molit.go.kr/USR/policyData/m_34681/dtl.jsp?id=522
+newtown:molit:g2:incheon-geomdan,2,인천검단신도시,검단|검단신도시|인천검단,molit_newtown_g2,https://www.molit.go.kr/USR/policyData/m_34681/dtl.jsp?id=522
+newtown:molit:g2:asan,2,아산신도시,아산탕정배방|아산(탕정·배방)|탕정배방신도시,molit_newtown_g2,https://www.molit.go.kr/USR/policyData/m_34681/dtl.jsp?id=522
+newtown:molit:g2:daejeon-doan,2,대전도안신도시,대전도안|도안신도시|대전 도안신도시,molit_newtown_g2,https://www.molit.go.kr/USR/policyData/m_34681/dtl.jsp?id=522
+newtown:molit:g3:namyangju-wangsuk,3,남양주왕숙신도시,남양주왕숙|왕숙신도시|왕숙,molit_newtown_g3_core,https://www.molit.go.kr/mta/USR/N0201/m_36770/dtl.jsp?id=95085094
+newtown:molit:g3:hanam-gyosan,3,하남교산신도시,하남교산|교산신도시|교산,molit_newtown_g3_core,https://www.molit.go.kr/mta/USR/N0201/m_36770/dtl.jsp?id=95085094
+newtown:molit:g3:incheon-gyeyang,3,인천계양신도시,인천계양|계양신도시|계양,molit_newtown_g3_core,https://www.molit.go.kr/mta/USR/N0201/m_36770/dtl.jsp?id=95085094
+newtown:molit:g3:goyang-changneung,3,고양창릉신도시,고양창릉|창릉신도시|창릉,molit_newtown_g3_core,https://www.molit.go.kr/mta/USR/N0201/m_36770/dtl.jsp?id=95085094
+newtown:molit:g3:bucheon-daejang,3,부천대장신도시,부천대장|대장신도시|대장,molit_newtown_g3_core,https://www.molit.go.kr/mta/USR/N0201/m_36770/dtl.jsp?id=95085094
