@@ -5,7 +5,6 @@ The official archive contains both fixed-width TEXT and XLSX. XLSX is preferred
 for normalization; the raw archive remains the audit source.
 """
 from __future__ import annotations
-
 import argparse, csv, json, re
 from pathlib import Path
 from typing import Any
@@ -51,7 +50,8 @@ def join_name(*parts: str) -> str:
     return " ".join(p.strip() for p in parts if p and p.strip())
 
 
-def legal_type(code: str, emd: str) -> tuple[int,str]:
+def legal_type(code: str, emd: str, full_name: str) -> tuple[int,str]:
+    if len(full_name.split()) == 1: return 1, "SIDO"
     if code[2:] == "00000000": return 1, "SIDO"
     if code[5:] == "00000": return 2, "SIGUNGU"
     if code[8:] == "00":
@@ -61,7 +61,8 @@ def legal_type(code: str, emd: str) -> tuple[int,str]:
     return 4, "LEGAL_RI"
 
 
-def admin_type(code: str, emd: str) -> tuple[int,str]:
+def admin_type(code: str, emd: str, full_name: str) -> tuple[int,str]:
+    if len(full_name.split()) == 1: return 1, "ADMIN_SIDO"
     if code[2:] == "00000000": return 1, "ADMIN_SIDO"
     if code[5:] == "00000": return 2, "ADMIN_SIGUNGU"
     if emd.endswith("읍"): return 3, "ADMIN_EUP"
@@ -91,14 +92,14 @@ def main():
     for r in hr:
         code=re.sub(r"\D","",r.get("행정동코드","")); sido=r.get("시도명",""); sgg=r.get("시군구명",""); emd=r.get("읍면동명","")
         if len(code)!=10: continue
-        level,ptype=admin_type(code,emd); full=join_name(sido,sgg,emd); pc=parent_code(code,level)
+        full=join_name(sido,sgg,emd); level,ptype=admin_type(code,emd,full); pc=parent_code(code,level)
         admin.append({"place_id":f"adm:{code}","place_type":ptype,"hierarchy_level":level,"name_ko":(emd or sgg or sido),"full_name_ko":full,"official_code":code,"parent_place_id":f"adm:{pc}" if pc else "","legal_status":status_from_end(r.get("말소일자")),"valid_from":date8(r.get("생성일자")),"valid_to":date8(r.get("말소일자")),"source_id":"mois_jscode","source_snapshot_date":a.snapshot_date})
 
     legal=[]
     for r in br:
         code=re.sub(r"\D","",r.get("법정동코드","")); sido=r.get("시도명",""); sgg=r.get("시군구명",""); emd=r.get("읍면동명",""); ri=r.get("동리명","")
         if len(code)!=10: continue
-        level,ptype=legal_type(code,emd); full=join_name(sido,sgg,emd,ri); pc=parent_code(code,level)
+        full=join_name(sido,sgg,emd,ri); level,ptype=legal_type(code,emd,full); pc=parent_code(code,level)
         legal.append({"place_id":f"bjd:{code}","place_type":ptype,"hierarchy_level":level,"name_ko":(ri or emd or sgg or sido),"full_name_ko":full,"official_code":code,"parent_place_id":f"bjd:{pc}" if pc else "","legal_status":status_from_end(r.get("말소일자")),"valid_from":date8(r.get("생성일자")),"valid_to":date8(r.get("말소일자")),"source_id":"mois_jscode","source_snapshot_date":a.snapshot_date})
 
     relations=[]
