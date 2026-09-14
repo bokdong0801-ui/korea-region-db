@@ -6,133 +6,78 @@ on:
     paths:
       - '.github/workflows/build-newtown-v4.yml'
       - 'scripts/build_newtown_overlay.py'
-      - 'scripts/build_geo_master.py'
-      - 'scripts/download_tpsis_districts.py'
-      - 'scripts/import_tpsis_districts.py'
-      - 'scripts/download_kric_stations.py'
-      - 'scripts/import_kric_stations.py'
-      - 'scripts/download_codego_bjd.py'
-      - 'scripts/import_codego_bjd.py'
-      - 'scripts/import_mois_jscode.py'
-      - 'scripts/build_master.py'
-      - 'scripts/build_history.py'
+      - 'scripts/augment_geo_v4_newtown.py'
       - 'data/rules/newtowns_official.csv'
-      - 'data/rules/relation_exceptions.csv'
-      - 'data/rules/station_address_corrections.csv'
 
 jobs:
   build-newtown-v4:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
-      - run: python -m pip install --disable-pip-version-check openpyxl
-      - run: mkdir -p /tmp/mois /tmp/codego /tmp/stations/raw /tmp/tpsis /tmp/newtown /tmp/geo
+      - run: mkdir -p /tmp/v3 /tmp/newtown/normalized /tmp/v4/master /tmp/v4
 
-      - name: Restore MOIS official snapshot
-        id: mois-cache
-        uses: actions/cache@v4
-        with:
-          path: /tmp/mois/jscode20260720_abolished.zip
-          key: mois-jscode-20260720-c32eb452ae7f2d7300e33b444e8d4c7aaf4faa356444cec87fb545f2a702969d
-
-      - name: Download MOIS snapshot on cache miss
-        if: steps.mois-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          ARTICLE='https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000052&nttId=127979'
-          URL='https://www.mois.go.kr/cmm/fms/FileDown.do?atchFileId=FILE_00147311ctH5-ah&fileSn=2'
-          curl -fsSL -A 'Mozilla/5.0' -c /tmp/mois/cookies.txt "$ARTICLE" -o /tmp/mois/article.html
-          curl -fSL -A 'Mozilla/5.0' -b /tmp/mois/cookies.txt -e "$ARTICLE" "$URL" -o /tmp/mois/jscode20260720_abolished.zip
-
-      - name: Rebuild official administrative Master V1
-        run: |
-          echo 'c32eb452ae7f2d7300e33b444e8d4c7aaf4faa356444cec87fb545f2a702969d  /tmp/mois/jscode20260720_abolished.zip' | sha256sum -c -
-          mkdir -p /tmp/mois/extracted && unzip -oq /tmp/mois/jscode20260720_abolished.zip -d /tmp/mois/extracted
-          python scripts/download_codego_bjd.py --snapshot-date 2026-09-14 --out-dir /tmp/codego
-          python scripts/import_mois_jscode.py /tmp/mois/extracted --snapshot-date 2026-07-20 --out-dir /tmp/mois/normalized
-          python scripts/import_codego_bjd.py /tmp/codego/codego_bjd_full_2026-09-14.txt --snapshot-date 2026-09-14 --out-dir /tmp/mois/normalized
-          python scripts/build_master.py --normalized-dir /tmp/mois/normalized --rules-dir data/rules --out-dir /tmp/mois/master
-          python scripts/build_history.py --master-dir /tmp/mois/master
-
-      - name: Restore KRiC station snapshot
-        id: kric-cache
-        uses: actions/cache@v4
-        with:
-          path: /tmp/stations/raw/kric_urban_stations_2026-06-30.xlsx
-          key: kric-stations-20260630-cdf1d84a7e5c898b2aacd622783ba8ba9af35c40bee0561dc97d55ce8e063f94
-
-      - name: Build station layer
+      - name: Download audited Geo Master V3 artifact
         env:
           GITHUB_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          STATION=/tmp/stations/raw/kric_urban_stations_2026-06-30.xlsx
-          if [ ! -s "$STATION" ]; then
-            if ! python scripts/download_kric_stations.py --snapshot-date 2026-06-30 --out-dir /tmp/stations/raw; then
-              echo 'KRiC direct download failed; restoring audited V3 station snapshot artifact.'
-              curl -fL \
-                -H "Authorization: Bearer $GITHUB_TOKEN" \
-                -H 'Accept: application/vnd.github+json' \
-                -H 'X-GitHub-Api-Version: 2022-11-28' \
-                "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/10341947255/zip" \
-                -o /tmp/v3-stations.zip
-              rm -rf /tmp/v3-stations && mkdir -p /tmp/v3-stations
-              unzip -oq /tmp/v3-stations.zip 'stations/raw/kric_urban_stations_2026-06-30.xlsx' -d /tmp/v3-stations
-              cp /tmp/v3-stations/stations/raw/kric_urban_stations_2026-06-30.xlsx "$STATION"
-            fi
-          fi
-          echo 'cdf1d84a7e5c898b2aacd622783ba8ba9af35c40bee0561dc97d55ce8e063f94  /tmp/stations/raw/kric_urban_stations_2026-06-30.xlsx' | sha256sum -c -
-          python scripts/import_kric_stations.py "$STATION" \
-            --master-places /tmp/mois/master/places_master.csv --rules-dir data/rules \
-            --snapshot-date 2026-06-30 --out-dir /tmp/stations/normalized
+          curl -fL \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/10341947255/zip" \
+            -o /tmp/v3.zip
+          unzip -oq /tmp/v3.zip -d /tmp/v3
+          test -s /tmp/v3/geo/master/places_geo_master.csv
+          test -s /tmp/v3/tpsis/normalized/places_development.csv
+          python - <<'PY'
+          import json
+          r=json.load(open('/tmp/v3/geo/master/geo_master_report.json',encoding='utf-8'))
+          assert r['places']==65447 and r['relations']==124317 and r['unresolved_geo_relations']==0, r
+          print('AUDITED V3 INPUT PASS',r)
+          PY
 
-      - name: Build TPSIS development layer
-        run: |
-          python scripts/download_tpsis_districts.py --out-dir /tmp/tpsis/raw
-          python scripts/import_tpsis_districts.py --raw-dir /tmp/tpsis/raw \
-            --master-places /tmp/mois/master/places_master.csv \
-            --snapshot-date 2026-08-31 --out-dir /tmp/tpsis/normalized
-
-      - name: Build 22-newtown overlay
+      - name: Build official 22-newtown overlay
         run: |
           python scripts/build_newtown_overlay.py \
-            --development-dir /tmp/tpsis/normalized \
+            --development-dir /tmp/v3/tpsis/normalized \
             --rules data/rules/newtowns_official.csv \
             --snapshot-date 2026-09-14 --out-dir /tmp/newtown/normalized
           cat /tmp/newtown/normalized/newtown_overlay_report.json
 
-      - name: Build integrated Geo Master V4
+      - name: Overlay Newtown layer onto V3
         run: |
-          python scripts/build_geo_master.py --base-master /tmp/mois/master \
-            --station-dir /tmp/stations/normalized --development-dir /tmp/tpsis/normalized \
-            --named-place-dir /tmp/newtown/normalized --out-dir /tmp/geo/master
-          cat /tmp/geo/master/geo_master_report.json
+          python scripts/augment_geo_v4_newtown.py \
+            --v3-geo-dir /tmp/v3/geo/master \
+            --newtown-dir /tmp/newtown/normalized \
+            --out-dir /tmp/v4/master
+          cat /tmp/v4/master/geo_master_v4_report.json
 
       - name: V4 quality gate
         run: |
           python - <<'PY'
-          import json,csv
-          s=json.load(open('/tmp/stations/normalized/station_import_report.json',encoding='utf-8'))
-          d=json.load(open('/tmp/tpsis/normalized/development_import_report.json',encoding='utf-8'))
+          import csv,json
           n=json.load(open('/tmp/newtown/normalized/newtown_overlay_report.json',encoding='utf-8'))
-          g=json.load(open('/tmp/geo/master/geo_master_report.json',encoding='utf-8'))
-          assert s['physical_stations']==1052 and s['unmatched_regions']==0, s
-          assert d['districts']==1372 and d['unmatched_regions']==0 and d['missing_latest_history']==0, d
+          g=json.load(open('/tmp/v4/master/geo_master_v4_report.json',encoding='utf-8'))
           assert n['newtowns']==22, n
-          assert n['project_relations']==26 and n['unmatched_projects']==0, n
           assert n['generation_counts']=={'1':5,'2':12,'3':5}, n
+          assert n['project_relations']==26 and n['unmatched_projects']==0, n
           assert n['verified_newtowns']==22, n
-          assert g['places']==65469, g
-          assert g['relations']==124343, g
-          assert g['unresolved_geo_relations']==0, g
-          with open('/tmp/geo/master/places_geo_master.csv',encoding='utf-8-sig',newline='') as f:
-            rows=list(csv.DictReader(f))
-          assert sum(r['place_type']=='NEWTOWN' for r in rows)==22
+          assert g['base_v3_places']==65447, g
+          assert g['places']==65469 and g['added_newtowns']==22, g
+          assert g['relations']==124343 and g['added_newtown_relations']==26, g
+          assert g['newtown_count']==22 and g['unresolved_geo_relations']==0, g
+          with open('/tmp/v4/master/relations_geo_master.csv',encoding='utf-8-sig',newline='') as f:
+            rels=list(csv.DictReader(f))
+          nt=[r for r in rels if r['relation_type']=='NEWTOWN_PROJECT_OF']
+          assert len(nt)==26, len(nt)
           print('GEO MASTER V4 NEWTOWN QUALITY GATE PASS')
           PY
 
@@ -140,13 +85,13 @@ jobs:
         run: |
           python - <<'PY'
           import hashlib,json,pathlib
-          roots=[pathlib.Path('/tmp/stations'),pathlib.Path('/tmp/tpsis'),pathlib.Path('/tmp/newtown'),pathlib.Path('/tmp/geo')]
+          roots=[pathlib.Path('/tmp/newtown'),pathlib.Path('/tmp/v4')]
           files=[]
           for root in roots:
             for p in sorted(root.rglob('*')):
               if p.is_file(): files.append({'path':str(p),'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
-          manifest={'release':'korea-geo-master-v4-newtown','administrative_snapshot':'2026-09-14','station_snapshot':'2026-06-30','development_snapshot':'2026-08-31','newtown_overlay_snapshot':'2026-09-14','expected_newtowns':22,'expected_project_links':26,'files':files}
-          pathlib.Path('/tmp/geo/V4_MANIFEST.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
+          manifest={'release':'korea-geo-master-v4-newtown','base_v3_artifact_id':10341947255,'base_v3_places':65447,'newtowns':22,'project_links':26,'final_places':65469,'final_relations':124343,'snapshot_date':'2026-09-14','files':files}
+          pathlib.Path('/tmp/v4/V4_MANIFEST.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
           PY
 
       - name: Upload Geo Master V4 artifact
@@ -154,11 +99,7 @@ jobs:
         with:
           name: korea-geo-master-v4-newtown-20260914
           path: |
-            /tmp/stations/**
-            /tmp/tpsis/**
             /tmp/newtown/**
-            /tmp/geo/**
-            /tmp/mois/master/build_master_report.json
-            /tmp/mois/master/place_history_report.json
+            /tmp/v4/**
           if-no-files-found: error
           retention-days: 90
