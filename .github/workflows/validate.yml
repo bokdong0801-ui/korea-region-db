@@ -1,0 +1,21 @@
+name: Validate Korea Region DB
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  sample-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Normalize official sample
+        run: |
+          python scripts/import_codego_bjd.py data/samples/codego_bjd_sample.tsv --out-dir /tmp/region-normalized --snapshot-date 2026-09-14
+      - name: Validate normalized output
+        run: |
+          python scripts/validate_places.py /tmp/region-normalized/places_legal.csv
