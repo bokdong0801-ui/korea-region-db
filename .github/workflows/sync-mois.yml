@@ -1,0 +1,54 @@
+name: Sync MOIS Region Codes
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/sync-mois.yml'
+
+jobs:
+  sync-latest-jscode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download latest official MOIS jscode snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/mois
+          URL='https://www.mois.go.kr/cmm/fms/FileDown.do?atchFileId=FILE_00147311ctH5-ah&fileSn=2'
+          curl -fL --retry 3 --retry-delay 2 \
+            -A 'Mozilla/5.0' \
+            -e 'https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000052&nttId=127979' \
+            "$URL" -o /tmp/mois/jscode20260720_abolished.zip
+          file /tmp/mois/jscode20260720_abolished.zip
+          sha256sum /tmp/mois/jscode20260720_abolished.zip | tee /tmp/mois/SHA256SUMS.txt
+          unzip -l /tmp/mois/jscode20260720_abolished.zip | tee /tmp/mois/ZIP_CONTENTS.txt
+          mkdir -p /tmp/mois/extracted
+          unzip -o /tmp/mois/jscode20260720_abolished.zip -d /tmp/mois/extracted
+
+      - name: Normalize administrative/legal/mapping files
+        run: |
+          python scripts/import_mois_jscode.py /tmp/mois/extracted \
+            --snapshot-date 2026-07-20 \
+            --out-dir /tmp/mois/normalized
+
+      - name: Show normalized counts
+        run: |
+          cat /tmp/mois/normalized/mois_jscode_import_meta.json
+          wc -l /tmp/mois/normalized/*.csv || true
+
+      - name: Upload normalized snapshot artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mois-jscode-20260720-normalized
+          path: |
+            /tmp/mois/normalized/**
+            /tmp/mois/SHA256SUMS.txt
+            /tmp/mois/ZIP_CONTENTS.txt
+          retention-days: 30
