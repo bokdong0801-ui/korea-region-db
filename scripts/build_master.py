@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+"""Build unified Korea Region DB master files from normalized source CSVs.
+
+Inputs (when available):
+- places_legal.csv          primary legal hierarchy from Code.go
+- places_legal_mois.csv     MOIS legal codes (cross-check/status supplement)
+- places_admin.csv          administrative institutions/dongs
+- relations_admin_legal.csv N:M administrative↔legal mapping
+
+Outputs:
+- places_master.csv
+- relations_master.csv
+- aliases_master.csv
+- build_master_report.json
+
+The Code.go hierarchy remains authoritative for legal hierarchy. MOIS legal rows are
+used to check existence/status and to surface discrepancies rather than silently
+replacing Code.go values.
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+from collections import Counter
+from pathlib import Path
+
+
+def read_csv(path: Path) -> list[dict[str, str]]:
+    if not path.exists() or path.stat().st_size == 0:
+        return []
+    with path.open(encoding="utf-8-sig", newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def write_csv(path: Path, rows: list[dict[str, str]], fieldnames: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--normalized-dir", type=Path, default=Path("data/normalized"))
+    ap.add_argument("--out-dir", type=Path, default=Path("data/master"))
+    args = ap.parse_args()
+
+    n = args.normalized_dir
+    legal = read_csv(n / "places_legal.csv")
+    legal_mois = read_csv(n / "places_legal_mois.csv")
+    admin = read_csv(n / "places_admin.csv")
+    rel = read_csv(n / "relations_admin_legal.csv")
+    aliases = read_csv(n / "place_aliases_legal.csv")
+
+    if not legal and not legal_mois:
+        raise SystemExit("법정동 원본이 없습니다. places_legal.csv 또는 places_legal_mois.csv가 필요합니다.")
+
+    # Prefer Code.go legal records. If Code.go isn't present yet, accept MOIS legal
+    # rows as provisional records so the pipeline can still produce a usable V1.
+    by_id: dict[str, dict[str, str]] = {}
+    source_precedence: dict[str, str] = {}
+
+    for row in legal_mois:
+        pid = row.get("place_id", "")
+        if not pid:
+            continue
+        by_id[pid] = {
+            "place_id": pid,
+            "place_type": row.get("place_type", "LEGAL_UNKNOWN") or "LEGAL_UNKNOWN",
+            "hierarchy_level": row.get("hierarchy_level", ""),
+            "name_ko": row.get("name_ko", ""),
+            "full_name_ko": row.get("full_name_ko", ""),
+            "official_code": row.get("official_code", ""),
+            "parent_place_id": row.get("parent_place_id", ""),
+            "legal_status": row.get("legal_status", "UNKNOWN"),
+            "source_id": row.get("source_id", "mois_jscode"),
+            "source_snapshot_date": row.get("source_snapshot_date", ""),
+        }
+        source_precedence[pid] = "MOIS"
+
+    for row in legal:
+        pid = row.get("place_id", "")
+        if not pid:
+            continue
+        by_id[pid] = dict(row)
+        source_precedence[pid] = "CODEGO"
+
+    discrepancies: list[dict[str, str]] = []
+    mois_by_id = {r.get("place_id", ""): r for r in legal_mois if r.get("place_id")}
+    for pid, primary in by_id.items():
+        if source_precedence.get(pid) != "CODEGO" or pid not in mois_by_id:
+            continue
+        secondary = mois_by_id[pid]
+        for field in ("full_name_ko", "legal_status"):
+            a = (primary.get(field) or "").strip()
+            b = (secondary.get(field) or "").strip()
+            if a and b and a != b:
+                discrepancies.append({
+                    "place_id": pid,
+                    "field": field,
+                    "codego": a,
+                    "mois": b,
+                })
+
+    for row in admin:
+        pid = row.get("place_id", "")
+        if not pid:
+            continue
+        by_id[pid] = {
+            "place_id": pid,
+            "place_type": row.get("place_type", "ADMIN_DONG") or "ADMIN_DONG",
+            "hierarchy_level": row.get("hierarchy_level", ""),
+            "name_ko": row.get("name_ko", ""),
+            "full_name_ko": row.get("full_name_ko", ""),
+            "official_code": row.get("official_code", ""),
+            "parent_place_id": row.get("parent_place_id", ""),
+            "legal_status": row.get("legal_status", "UNKNOWN"),
+            "source_id": row.get("source_id", "mois_jscode"),
+            "source_snapshot_date": row.get("source_snapshot_date", ""),
+        }
+
+    master = sorted(by_id.values(), key=lambda r: (r.get("place_type", ""), r.get("official_code", ""), r.get("place_id", "")))
+
+    relation_rows: list[dict[str, str]] = []
+    seen_rel: set[tuple[str, str, str]] = set()
+    for r in rel:
+        key = (r.get("from_place_id", ""), r.get("to_place_id", ""), r.get("relation_type", ""))
+        if not all(key) or key in seen_rel:
+            continue
+        seen_rel.add(key)
+        relation_rows.append(r)
+
+    # Add explicit hierarchy PART_OF relations for all records that have a parent.
+    for r in master:
+        pid = r.get("place_id", "")
+        parent = r.get("parent_place_id", "")
+        if not pid or not parent:
+            continue
+        key = (pid, parent, "PART_OF")
+        if key in seen_rel:
+            continue
+        seen_rel.add(key)
+        relation_rows.append({
+            "from_place_id": pid,
+            "to_place_id": parent,
+            "relation_type": "PART_OF",
+            "legal_status": r.get("legal_status", "UNKNOWN"),
+            "source_id": r.get("source_id", ""),
+            "source_snapshot_date": r.get("source_snapshot_date", ""),
+        })
+
+    place_fields = [
+        "place_id", "place_type", "hierarchy_level", "name_ko", "full_name_ko",
+        "official_code", "parent_place_id", "legal_status", "source_id", "source_snapshot_date"
+    ]
+    rel_fields = [
+        "from_place_id", "to_place_id", "relation_type", "legal_status", "source_id", "source_snapshot_date"
+    ]
+    alias_fields = ["place_id", "alias", "alias_type", "source_id"]
+
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    write_csv(args.out_dir / "places_master.csv", master, place_fields)
+    write_csv(args.out_dir / "relations_master.csv", relation_rows, rel_fields)
+    write_csv(args.out_dir / "aliases_master.csv", aliases, alias_fields)
+    write_csv(args.out_dir / "source_discrepancies.csv", discrepancies, ["place_id", "field", "codego", "mois"])
+
+    report = {
+        "places": len(master),
+        "relations": len(relation_rows),
+        "aliases": len(aliases),
+        "source_discrepancies": len(discrepancies),
+        "by_type": dict(Counter(r.get("place_type", "") for r in master)),
+        "by_status": dict(Counter(r.get("legal_status", "") for r in master)),
+        "inputs": {
+            "codego_legal": len(legal),
+            "mois_legal": len(legal_mois),
+            "mois_admin": len(admin),
+            "mois_mapping": len(rel),
+        },
+    }
+    (args.out_dir / "build_master_report.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()
