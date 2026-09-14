@@ -29,7 +29,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - run: python -m pip install --disable-pip-version-check openpyxl
-      - run: mkdir -p /tmp/mois /tmp/codego /tmp/stations /tmp/tpsis /tmp/newtown /tmp/geo
+      - run: mkdir -p /tmp/mois /tmp/codego /tmp/stations/raw /tmp/tpsis /tmp/newtown /tmp/geo
 
       - name: Restore MOIS official snapshot
         id: mois-cache
@@ -58,10 +58,36 @@ jobs:
           python scripts/build_master.py --normalized-dir /tmp/mois/normalized --rules-dir data/rules --out-dir /tmp/mois/master
           python scripts/build_history.py --master-dir /tmp/mois/master
 
+      - name: Restore KRiC station snapshot
+        id: kric-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/stations/raw/kric_urban_stations_2026-06-30.xlsx
+          key: kric-stations-20260630-cdf1d84a7e5c898b2aacd622783ba8ba9af35c40bee0561dc97d55ce8e063f94
+
       - name: Build station layer
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
-          python scripts/download_kric_stations.py --snapshot-date 2026-06-30 --out-dir /tmp/stations/raw
-          python scripts/import_kric_stations.py /tmp/stations/raw/kric_urban_stations_2026-06-30.xlsx \
+          set -euo pipefail
+          STATION=/tmp/stations/raw/kric_urban_stations_2026-06-30.xlsx
+          if [ ! -s "$STATION" ]; then
+            if ! python scripts/download_kric_stations.py --snapshot-date 2026-06-30 --out-dir /tmp/stations/raw; then
+              echo 'KRiC direct download failed; restoring audited V3 station snapshot artifact.'
+              curl -fL \
+                -H "Authorization: Bearer $GITHUB_TOKEN" \
+                -H 'Accept: application/vnd.github+json' \
+                -H 'X-GitHub-Api-Version: 2022-11-28' \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/10341947255/zip" \
+                -o /tmp/v3-stations.zip
+              rm -rf /tmp/v3-stations && mkdir -p /tmp/v3-stations
+              unzip -oq /tmp/v3-stations.zip 'stations/raw/kric_urban_stations_2026-06-30.xlsx' -d /tmp/v3-stations
+              cp /tmp/v3-stations/stations/raw/kric_urban_stations_2026-06-30.xlsx "$STATION"
+            fi
+          fi
+          echo 'cdf1d84a7e5c898b2aacd622783ba8ba9af35c40bee0561dc97d55ce8e063f94  /tmp/stations/raw/kric_urban_stations_2026-06-30.xlsx' | sha256sum -c -
+          python scripts/import_kric_stations.py "$STATION" \
             --master-places /tmp/mois/master/places_master.csv --rules-dir data/rules \
             --snapshot-date 2026-06-30 --out-dir /tmp/stations/normalized
 
