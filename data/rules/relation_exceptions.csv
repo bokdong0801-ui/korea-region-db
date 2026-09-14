@@ -1,0 +1,13 @@
+from_place_id,to_place_id,relation_type,resolution_code,note,source_id
+adm:2811400000,bjd:2811400000,ADMINISTERS,ADMIN_OFFICE_NO_LEGAL_ENTITY,인천광역시 중구영종출장소는 행정기관 코드로 존재하지만 대응 법정지역 엔티티가 없어 ADMINISTERS 그래프에서 제외하고 원천 예외로 보존,mois_jscode
+adm:2811700000,bjd:2811700000,ADMINISTERS,ADMIN_OFFICE_NO_LEGAL_ENTITY,인천광역시 중구영종용유출장소는 행정기관 코드로 존재하지만 대응 법정지역 엔티티가 없어 ADMINISTERS 그래프에서 제외하고 원천 예외로 보존,mois_jscode
+adm:2811800000,bjd:2811800000,ADMINISTERS,ADMIN_OFFICE_NO_LEGAL_ENTITY,인천광역시 중구용유출장소는 행정기관 코드로 존재하지만 대응 법정지역 엔티티가 없어 ADMINISTERS 그래프에서 제외하고 원천 예외로 보존,mois_jscode
+adm:4113200000,bjd:4113700000,ADMINISTERS,ADMIN_OFFICE_LEGACY_TARGET_MISSING,경기도 성남시수정출장소의 KiKmix 대상 코드가 법정지역 원천에 존재하지 않아 임의 대체하지 않고 원천 예외로 보존,mois_jscode
+adm:4122200000,bjd:4122200000,ADMINISTERS,ADMIN_OFFICE_NO_LEGAL_ENTITY,경기도 송탄출장소는 행정기관 코드로 존재하지만 대응 법정지역 엔티티가 없어 ADMINISTERS 그래프에서 제외하고 원천 예외로 보존,mois_jscode
+adm:4122400000,bjd:4122400000,ADMINISTERS,ADMIN_OFFICE_NO_LEGAL_ENTITY,경기도 안중출장소는 행정기관 코드로 존재하지만 대응 법정지역 엔티티가 없어 ADMINISTERS 그래프에서 제외하고 원천 예외로 보존,mois_jscode
+adm:4136200000,bjd:4136200000,ADMINISTERS,ADMIN_OFFICE_NO_LEGAL_ENTITY,경기도 풍양출장소는 행정기관 코드로 존재하지만 대응 법정지역 엔티티가 없어 ADMINISTERS 그래프에서 제외하고 원천 예외로 보존,mois_jscode
+adm:4159200000,bjd:4159200000,ADMINISTERS,ADMIN_OFFICE_NO_LEGAL_ENTITY,경기도 화성시동부출장소는 행정기관 코드로 존재하지만 대응 법정지역 엔티티가 없어 ADMINISTERS 그래프에서 제외하고 원천 예외로 보존,mois_jscode
+adm:4159400000,bjd:4159400000,ADMINISTERS,ADMIN_OFFICE_NO_LEGAL_ENTITY,경기도 화성시동탄출장소는 행정기관 코드로 존재하지만 대응 법정지역 엔티티가 없어 ADMINISTERS 그래프에서 제외하고 원천 예외로 보존,mois_jscode
+adm:4175031000,bjd:0013130210,ADMINISTERS,LEGACY_LEGAL_CODE_REFERENCE,화성군 반월면 KiKmix가 현행 법정동 코드체계에 없는 legacy 법정참조 코드를 사용하므로 임의 successor 매핑 없이 원천 예외로 보존,mois_jscode
+adm:4825200000,bjd:4825200000,ADMINISTERS,ADMIN_OFFICE_NO_LEGAL_ENTITY,경상남도 장유출장소는 행정기관 코드로 존재하지만 대응 법정지역 엔티티가 없어 ADMINISTERS 그래프에서 제외하고 원천 예외로 보존,mois_jscode
+adm:4833200000,bjd:4833200000,ADMINISTERS,ADMIN_OFFICE_NO_LEGAL_ENTITY,경상남도 양산시웅상출장소는 행정기관 코드로 존재하지만 대응 법정지역 엔티티가 없어 ADMINISTERS 그래프에서 제외하고 원천 예외로 보존,mois_jscode
