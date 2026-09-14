@@ -14,24 +14,43 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
-      - name: Inspect MAFRA village dataset page and public endpoints
+      - name: Test MAFRA nationwide village CSV export
         shell: bash
         run: |
           set -euo pipefail
-          PAGE='https://data.mafra.go.kr/opendata/data/indexOpenDataDetail.do?data_id=20170216000000000771'
-          curl -fsSL -A 'Mozilla/5.0' "$PAGE" -o /tmp/mafra.html
-          echo '=== PAGE BYTES ==='
-          wc -c /tmp/mafra.html
-          echo '=== DOWNLOAD FUNCTIONS ==='
+          BASE='https://data.mafra.go.kr'
+          PAGE="$BASE/opendata/data/indexOpenDataDetail.do?data_id=20170216000000000771"
+          curl -fsSL -A 'Mozilla/5.0' -c /tmp/cookies.txt "$PAGE" -o /tmp/mafra.html
+          echo '=== SAMPLE API TOTAL ==='
+          curl -fsSL --max-time 30 'http://211.237.50.150:7080/openapi/sample/xml/Grid_20160127000000000340_1/1/5' | grep -Eo '<totalCnt>[0-9]+</totalCnt>' || true
+          echo '=== COUNT ENDPOINT ==='
+          curl -sS -D /tmp/count.headers -b /tmp/cookies.txt -c /tmp/cookies.txt -A 'Mozilla/5.0' -e "$PAGE" \
+            -X POST "$BASE/opendata/data/getDataCount.do?s_entity_id=TI_EPIS_FMLG_VILAGE_BASS_INFO&s_search_form_name=&s_search_form_value=" \
+            -o /tmp/count.body || true
+          head -n 20 /tmp/count.headers || true
+          head -c 1000 /tmp/count.body || true
+          echo
+          echo '=== CSV EXPORT ENDPOINT ==='
+          curl -sS -L -D /tmp/csv.headers -b /tmp/cookies.txt -c /tmp/cookies.txt -A 'Mozilla/5.0' -e "$PAGE" \
+            -X POST "$BASE/opendata/data/getDataFile.do" \
+            --data-urlencode 's_entity_id=TI_EPIS_FMLG_VILAGE_BASS_INFO' \
+            --data-urlencode 'fileGubun=CSV' \
+            --data-urlencode 's_search_form_name=' \
+            --data-urlencode 's_search_form_value=' \
+            -o /tmp/villages.out || true
+          head -n 30 /tmp/csv.headers || true
+          file /tmp/villages.out || true
+          wc -c /tmp/villages.out || true
+          echo '=== FIRST BYTES/TEXT ==='
           python - <<'PY'
           from pathlib import Path
-          s=Path('/tmp/mafra.html').read_text(encoding='utf-8',errors='ignore')
-          for needle in ['function getDataTotal','function getDataCsv','function getDataXls','function filedownload']:
-              i=s.find(needle)
-              print('\n###',needle,'OFFSET',i)
-              if i>=0: print(s[i:i+5000])
+          p=Path('/tmp/villages.out')
+          b=p.read_bytes() if p.exists() else b''
+          print('bytes',len(b),'prefix',repr(b[:120]))
+          for enc in ('utf-8','cp949','euc-kr'):
+              try:
+                  print(enc, b[:2000].decode(enc)[:1000])
+                  break
+              except Exception: pass
           PY
-          echo '=== SAMPLE XML TOTAL ==='
-          curl -fsSL --max-time 30 'http://211.237.50.150:7080/openapi/sample/xml/Grid_20160127000000000340_1/1/5' | head -c 1200 || true
-          echo
           echo '=== END ==='
