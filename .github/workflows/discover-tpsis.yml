@@ -1,0 +1,16 @@
+name: Discover TPSIS Download
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/discover-tpsis.yml'
+      - 'scripts/discover_tpsis_download.py'
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: python scripts/discover_tpsis_download.py
