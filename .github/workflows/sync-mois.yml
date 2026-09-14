@@ -10,7 +10,7 @@ on:
 jobs:
   sync-latest-jscode:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -21,32 +21,47 @@ jobs:
       - name: Install parser dependency
         run: python -m pip install --disable-pip-version-check openpyxl
 
+      - name: Prepare snapshot cache path
+        run: mkdir -p /tmp/mois
+
+      - name: Restore official snapshot cache
+        id: mois-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/mois/jscode20260720_abolished.zip
+          key: mois-jscode-20260720-c32eb452ae7f2d7300e33b444e8d4c7aaf4faa356444cec87fb545f2a702969d
+
       - name: Download latest official MOIS jscode snapshot
+        if: steps.mois-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/mois
           ARTICLE='https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000052&nttId=127979'
           URL='https://www.mois.go.kr/cmm/fms/FileDown.do?atchFileId=FILE_00147311ctH5-ah&fileSn=2'
 
           curl -fsSL \
             --connect-timeout 15 --max-time 45 \
-            --retry 2 --retry-delay 2 --retry-all-errors \
+            --retry 3 --retry-delay 4 --retry-all-errors \
             -A 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/140 Safari/537.36' \
             -c /tmp/mois/cookies.txt \
             "$ARTICLE" -o /tmp/mois/article.html
 
           curl -fSL \
-            --connect-timeout 15 --max-time 90 \
-            --retry 2 --retry-delay 2 --retry-all-errors \
+            --connect-timeout 15 --max-time 120 \
+            --retry 3 --retry-delay 5 --retry-all-errors \
             -A 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/140 Safari/537.36' \
             -b /tmp/mois/cookies.txt -c /tmp/mois/cookies.txt \
             -e "$ARTICLE" \
             "$URL" -o /tmp/mois/jscode20260720_abolished.zip
 
+      - name: Verify and extract snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
           test -s /tmp/mois/jscode20260720_abolished.zip
-          unzip -t /tmp/mois/jscode20260720_abolished.zip
+          echo 'c32eb452ae7f2d7300e33b444e8d4c7aaf4faa356444cec87fb545f2a702969d  /tmp/mois/jscode20260720_abolished.zip' | sha256sum -c -
           sha256sum /tmp/mois/jscode20260720_abolished.zip | tee /tmp/mois/SHA256SUMS.txt
+          unzip -t /tmp/mois/jscode20260720_abolished.zip
           unzip -l /tmp/mois/jscode20260720_abolished.zip | tee /tmp/mois/ZIP_CONTENTS.txt
           mkdir -p /tmp/mois/extracted
           unzip -o /tmp/mois/jscode20260720_abolished.zip -d /tmp/mois/extracted
@@ -62,12 +77,13 @@ jobs:
           cat /tmp/mois/normalized/mois_jscode_import_meta.json
           wc -l /tmp/mois/normalized/*.csv || true
 
-      - name: Upload normalized snapshot artifact
+      - name: Upload source and normalized snapshot artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mois-jscode-20260720-normalized
+          name: mois-jscode-20260720-snapshot
           path: |
+            /tmp/mois/jscode20260720_abolished.zip
             /tmp/mois/normalized/**
             /tmp/mois/SHA256SUMS.txt
             /tmp/mois/ZIP_CONTENTS.txt
