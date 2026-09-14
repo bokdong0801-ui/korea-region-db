@@ -11,10 +11,11 @@ CREATE TABLE places (
   legal_status ENUM('CURRENT','ABOLISHED','PLANNED','UNKNOWN') NOT NULL DEFAULT 'CURRENT',
   valid_from DATE NULL,
   valid_to DATE NULL,
+  source_id VARCHAR(80) NOT NULL,
+  validity_source_id VARCHAR(80) NULL,
+  source_snapshot_date DATE NULL,
   latitude DECIMAL(10,7) NULL,
   longitude DECIMAL(10,7) NULL,
-  source_id VARCHAR(80) NOT NULL,
-  source_snapshot_date DATE NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_places_type (place_type),
@@ -45,7 +46,7 @@ CREATE TABLE place_relations (
   source_id VARCHAR(80) NULL,
   valid_from DATE NULL,
   valid_to DATE NULL,
-  UNIQUE KEY uq_relation (from_place_id, to_place_id, relation_type),
+  UNIQUE KEY uq_relation (from_place_id, to_place_id, relation_type, valid_from, valid_to),
   INDEX idx_relation_from (from_place_id),
   INDEX idx_relation_to (to_place_id),
   CONSTRAINT fk_relation_from FOREIGN KEY (from_place_id) REFERENCES places(place_id),
@@ -53,18 +54,18 @@ CREATE TABLE place_relations (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE place_history (
-  history_id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  old_place_id VARCHAR(64) NOT NULL,
-  new_place_id VARCHAR(64) NULL,
+  history_id VARCHAR(32) PRIMARY KEY,
+  place_id VARCHAR(64) NOT NULL,
+  related_place_id VARCHAR(64) NULL,
   event_type ENUM('CREATED','RENAMED','ABOLISHED','MERGED','SPLIT','BOUNDARY_CHANGE','TYPE_CHANGE','UNKNOWN') NOT NULL,
   effective_date DATE NULL,
   note TEXT NULL,
   source_id VARCHAR(80) NOT NULL,
-  INDEX idx_history_old (old_place_id),
-  INDEX idx_history_new (new_place_id),
+  INDEX idx_history_place (place_id),
+  INDEX idx_history_related (related_place_id),
   INDEX idx_history_date (effective_date),
-  CONSTRAINT fk_history_old FOREIGN KEY (old_place_id) REFERENCES places(place_id),
-  CONSTRAINT fk_history_new FOREIGN KEY (new_place_id) REFERENCES places(place_id)
+  CONSTRAINT fk_history_place FOREIGN KEY (place_id) REFERENCES places(place_id),
+  CONSTRAINT fk_history_related FOREIGN KEY (related_place_id) REFERENCES places(place_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE source_snapshots (
