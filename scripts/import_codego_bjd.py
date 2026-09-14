@@ -6,10 +6,9 @@ Expected common columns:
 - 법정동명
 - 폐지여부
 
-The official file is often tab-separated and CP949/EUC-KR encoded. This importer
-tries UTF-8-SIG, CP949 and EUC-KR automatically and never drops abolished rows.
+The official file is tab-separated and CP949/EUC-KR encoded. This importer
+tries common encodings automatically and never drops abolished rows.
 """
-
 from __future__ import annotations
 
 import argparse
@@ -57,9 +56,13 @@ def pick(header_map: dict[str, str], *candidates: str) -> str:
     raise KeyError(f"필수 컬럼을 찾지 못했습니다: {candidates}")
 
 
-def level_and_type(code: str, short_name: str) -> tuple[int, str]:
+def level_and_type(code: str, short_name: str, full_name: str) -> tuple[int, str]:
     if not re.fullmatch(r"\d{10}", code):
         raise ValueError(f"법정동코드는 10자리 숫자여야 합니다: {code}")
+    # 세종특별자치시(3611000000)처럼 최상위 지역인데 코드가 xx00000000
+    # 패턴을 따르지 않는 예외가 있으므로 공식 명칭의 계층도 함께 본다.
+    if len(full_name.split()) == 1:
+        return 1, "SIDO"
     if code[2:] == "00000000":
         return 1, "SIDO"
     if code[5:] == "00000":
@@ -93,7 +96,6 @@ def normalize_status(value: str) -> str:
         return "CURRENT"
     if v in abolished_tokens:
         return "ABOLISHED"
-    # Some files contain variants like '존재 ' or descriptive text.
     if "폐지" in v or "말소" in v:
         return "ABOLISHED"
     if "존재" in v or "현존" in v:
@@ -134,7 +136,7 @@ def main() -> None:
             continue
         try:
             short_name = full_name.split()[-1]
-            level, place_type = level_and_type(code, short_name)
+            level, place_type = level_and_type(code, short_name, full_name)
             pcode = parent_code(code, level)
             place_id = f"bjd:{code}"
             rows.append({
@@ -150,13 +152,8 @@ def main() -> None:
                 "source_snapshot_date": args.snapshot_date,
             })
             if short_name != full_name:
-                aliases.append({
-                    "place_id": place_id,
-                    "alias": short_name,
-                    "alias_type": "SHORT_NAME",
-                    "source_id": "codego_bjd",
-                })
-        except Exception as exc:  # keep bad source rows visible instead of silently dropping
+                aliases.append({"place_id": place_id, "alias": short_name, "alias_type": "SHORT_NAME", "source_id": "codego_bjd"})
+        except Exception as exc:
             errors.append({"line": str(line_no), "code": code, "name": full_name, "error": str(exc)})
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -167,27 +164,20 @@ def main() -> None:
 
     place_fields = ["place_id", "place_type", "hierarchy_level", "name_ko", "full_name_ko", "official_code", "parent_place_id", "legal_status", "source_id", "source_snapshot_date"]
     with place_path.open("w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=place_fields)
-        w.writeheader(); w.writerows(rows)
+        w = csv.DictWriter(f, fieldnames=place_fields); w.writeheader(); w.writerows(rows)
 
     alias_fields = ["place_id", "alias", "alias_type", "source_id"]
     with alias_path.open("w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=alias_fields)
-        w.writeheader(); w.writerows(aliases)
+        w = csv.DictWriter(f, fieldnames=alias_fields); w.writeheader(); w.writerows(aliases)
 
     error_path.write_text(json.dumps(errors, ensure_ascii=False, indent=2), encoding="utf-8")
     raw_sha256 = hashlib.sha256(args.input.read_bytes()).hexdigest()
     meta = {
-        "input": str(args.input),
-        "input_sha256": raw_sha256,
-        "detected_encoding": encoding,
-        "delimiter": "TAB" if delimiter == "\t" else delimiter,
-        "snapshot_date": args.snapshot_date,
-        "rows": len(rows),
-        "current": sum(r["legal_status"] == "CURRENT" for r in rows),
+        "input": str(args.input), "input_sha256": raw_sha256, "detected_encoding": encoding,
+        "delimiter": "TAB" if delimiter == "\t" else delimiter, "snapshot_date": args.snapshot_date,
+        "rows": len(rows), "current": sum(r["legal_status"] == "CURRENT" for r in rows),
         "abolished": sum(r["legal_status"] == "ABOLISHED" for r in rows),
-        "unknown_status": sum(r["legal_status"] == "UNKNOWN" for r in rows),
-        "errors": len(errors),
+        "unknown_status": sum(r["legal_status"] == "UNKNOWN" for r in rows), "errors": len(errors),
     }
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(meta, ensure_ascii=False, indent=2))
