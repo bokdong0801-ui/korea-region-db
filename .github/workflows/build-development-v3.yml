@@ -7,34 +7,112 @@ on:
       - '.github/workflows/build-development-v3.yml'
       - 'scripts/download_tpsis_districts.py'
       - 'scripts/import_tpsis_districts.py'
+      - 'scripts/download_kric_stations.py'
+      - 'scripts/import_kric_stations.py'
       - 'scripts/build_geo_master.py'
-      - 'data/rules/development_*.csv'
+      - 'scripts/download_codego_bjd.py'
+      - 'scripts/import_codego_bjd.py'
+      - 'scripts/import_mois_jscode.py'
+      - 'scripts/build_master.py'
+      - 'scripts/build_history.py'
+      - 'data/rules/*.csv'
 
 jobs:
   build-development-v3:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
-      - name: Download latest nationwide TPSIS files
-        run: python scripts/download_tpsis_districts.py --out-dir /tmp/tpsis/raw
-      - name: Inspect source encoding and headers
+      - run: python -m pip install --disable-pip-version-check openpyxl
+      - run: mkdir -p /tmp/mois /tmp/codego /tmp/stations /tmp/tpsis /tmp/geo
+
+      - name: Restore MOIS official snapshot
+        id: mois-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/mois/jscode20260720_abolished.zip
+          key: mois-jscode-20260720-c32eb452ae7f2d7300e33b444e8d4c7aaf4faa356444cec87fb545f2a702969d
+      - name: Download MOIS snapshot on cache miss
+        if: steps.mois-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARTICLE='https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000052&nttId=127979'
+          URL='https://www.mois.go.kr/cmm/fms/FileDown.do?atchFileId=FILE_00147311ctH5-ah&fileSn=2'
+          curl -fsSL -A 'Mozilla/5.0' -c /tmp/mois/cookies.txt "$ARTICLE" -o /tmp/mois/article.html
+          curl -fSL -A 'Mozilla/5.0' -b /tmp/mois/cookies.txt -e "$ARTICLE" "$URL" -o /tmp/mois/jscode20260720_abolished.zip
+      - name: Rebuild official Master V1
+        run: |
+          echo 'c32eb452ae7f2d7300e33b444e8d4c7aaf4faa356444cec87fb545f2a702969d  /tmp/mois/jscode20260720_abolished.zip' | sha256sum -c -
+          mkdir -p /tmp/mois/extracted && unzip -oq /tmp/mois/jscode20260720_abolished.zip -d /tmp/mois/extracted
+          python scripts/download_codego_bjd.py --snapshot-date 2026-09-14 --out-dir /tmp/codego
+          python scripts/import_mois_jscode.py /tmp/mois/extracted --snapshot-date 2026-07-20 --out-dir /tmp/mois/normalized
+          python scripts/import_codego_bjd.py /tmp/codego/codego_bjd_full_2026-09-14.txt --snapshot-date 2026-09-14 --out-dir /tmp/mois/normalized
+          python scripts/build_master.py --normalized-dir /tmp/mois/normalized --rules-dir data/rules --out-dir /tmp/mois/master
+          python scripts/build_history.py --master-dir /tmp/mois/master
+
+      - name: Build station layer
+        run: |
+          python scripts/download_kric_stations.py --snapshot-date 2026-06-30 --out-dir /tmp/stations/raw
+          python scripts/import_kric_stations.py /tmp/stations/raw/kric_urban_stations_2026-06-30.xlsx \
+            --master-places /tmp/mois/master/places_master.csv --rules-dir data/rules \
+            --snapshot-date 2026-06-30 --out-dir /tmp/stations/normalized
+          cat /tmp/stations/normalized/station_import_report.json
+
+      - name: Build development district layer
+        run: |
+          python scripts/download_tpsis_districts.py --out-dir /tmp/tpsis/raw
+          python scripts/import_tpsis_districts.py --raw-dir /tmp/tpsis/raw \
+            --master-places /tmp/mois/master/places_master.csv \
+            --snapshot-date 2026-08-31 --out-dir /tmp/tpsis/normalized
+          cat /tmp/tpsis/normalized/development_import_report.json
+
+      - name: Build integrated Geo Master V3
+        run: |
+          python scripts/build_geo_master.py --base-master /tmp/mois/master \
+            --station-dir /tmp/stations/normalized --development-dir /tmp/tpsis/normalized \
+            --out-dir /tmp/geo/master
+          cat /tmp/geo/master/geo_master_report.json
+
+      - name: Quality gate
         run: |
           python - <<'PY'
-          from pathlib import Path
-          for p in sorted(Path('/tmp/tpsis/raw').glob('BLS5_*.csv')):
-            b=p.read_bytes(); print('\nFILE',p.name,'BYTES',len(b),'HEAD',repr(b[:60]))
-            for enc in ('utf-8-sig','cp949','euc-kr','utf-8'):
-              try:
-                t=b.decode(enc); print('ENCODING',enc); print('\n'.join(t.splitlines()[:5])); break
-              except UnicodeDecodeError: pass
+          import json,csv
+          s=json.load(open('/tmp/stations/normalized/station_import_report.json',encoding='utf-8'))
+          d=json.load(open('/tmp/tpsis/normalized/development_import_report.json',encoding='utf-8'))
+          g=json.load(open('/tmp/geo/master/geo_master_report.json',encoding='utf-8'))
+          assert s['physical_stations']==1052 and s['unmatched_regions']==0 and s['stations_with_coordinates']==1052, s
+          assert d['districts']==1372 and d['unmatched_regions']==0 and d['missing_latest_history']==0, d
+          assert d['by_development_type'].get('LAND_DEVELOPMENT',0)>=500, d
+          assert d['by_development_type'].get('URBAN_DEVELOPMENT',0)>=250, d
+          assert d['by_development_type'].get('PUBLIC_HOUSING',0)>=180, d
+          assert g['unresolved_geo_relations']==0, g
+          print('GEO MASTER V3 QUALITY GATE PASS')
           PY
-      - name: Upload raw TPSIS snapshot
+
+      - name: Write manifest
+        run: |
+          python - <<'PY'
+          import hashlib,json,pathlib
+          roots=[pathlib.Path('/tmp/stations'),pathlib.Path('/tmp/tpsis'),pathlib.Path('/tmp/geo')]
+          files=[]
+          for root in roots:
+            for p in sorted(root.rglob('*')):
+              if p.is_file(): files.append({'path':str(p),'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          pathlib.Path('/tmp/geo/V3_MANIFEST.json').write_text(json.dumps({'release':'korea-geo-master-v3-development','station_snapshot':'2026-06-30','development_snapshot':'2026-08-31','files':files},ensure_ascii=False,indent=2),encoding='utf-8')
+          PY
+
+      - name: Upload Geo Master V3 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: tpsis-district-raw-20260914
-          path: /tmp/tpsis/raw/**
+          name: korea-geo-master-v3-development-20260914
+          path: |
+            /tmp/stations/**
+            /tmp/tpsis/**
+            /tmp/geo/**
+            /tmp/mois/master/build_master_report.json
+            /tmp/mois/master/place_history_report.json
           if-no-files-found: error
           retention-days: 90
