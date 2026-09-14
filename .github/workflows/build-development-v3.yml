@@ -1,0 +1,41 @@
+name: Build Korea Development Master V3
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-development-v3.yml'
+      - 'scripts/download_tpsis_districts.py'
+      - 'scripts/import_tpsis_districts.py'
+      - 'scripts/build_geo_master.py'
+      - 'data/rules/development_*.csv'
+
+jobs:
+  build-development-v3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Download latest nationwide TPSIS district CSV
+        run: python scripts/download_tpsis_districts.py --out-dir /tmp/tpsis/raw
+      - name: Inspect source encoding and headers
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=next(Path('/tmp/tpsis/raw').glob('tpsis_district_info_*.csv'))
+          b=p.read_bytes()
+          print('BYTES',len(b),'HEAD',repr(b[:120]))
+          for enc in ('utf-8-sig','cp949','euc-kr','utf-8'):
+            try:
+              t=b.decode(enc); print('ENCODING',enc); print('\n'.join(t.splitlines()[:5])); break
+            except UnicodeDecodeError: pass
+          PY
+      - name: Upload raw TPSIS snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: tpsis-district-raw-20260914
+          path: /tmp/tpsis/raw/**
+          if-no-files-found: error
+          retention-days: 90
