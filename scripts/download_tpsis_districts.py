@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 BASE='https://openapi.jigu.go.kr'; LIST=BASE+'/api/list.json'; OPENAPI=BASE+'/openApi'
-TABLES=('BLS5_DSTRC_INFO','BLS5_DSTRC_LAND_HIST')
+TABLES=('BLS5_DSTRC_INFO','BLS5_DSTRC_PROGRS_HIST')
 
 def request(url:str,data:dict|None=None,referer:str|None=None,timeout=120):
     body=urllib.parse.urlencode(data).encode() if data is not None else None
