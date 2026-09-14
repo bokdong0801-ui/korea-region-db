@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - '.github/workflows/sync-mois.yml'
+      - 'scripts/import_mois_jscode.py'
 
 jobs:
   sync-latest-jscode:
@@ -16,6 +17,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: Install parser dependency
+        run: python -m pip install --disable-pip-version-check openpyxl
 
       - name: Download latest official MOIS jscode snapshot
         shell: bash
@@ -41,44 +45,11 @@ jobs:
             "$URL" -o /tmp/mois/jscode20260720_abolished.zip
 
           test -s /tmp/mois/jscode20260720_abolished.zip
-          file /tmp/mois/jscode20260720_abolished.zip
           unzip -t /tmp/mois/jscode20260720_abolished.zip
           sha256sum /tmp/mois/jscode20260720_abolished.zip | tee /tmp/mois/SHA256SUMS.txt
           unzip -l /tmp/mois/jscode20260720_abolished.zip | tee /tmp/mois/ZIP_CONTENTS.txt
           mkdir -p /tmp/mois/extracted
           unzip -o /tmp/mois/jscode20260720_abolished.zip -d /tmp/mois/extracted
-
-      - name: Inspect current text layouts
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          root = Path('/tmp/mois/extracted')
-          for prefix in ('KIKcd_H', 'KIKcd_B', 'KIKmix'):
-              files = [p for p in root.iterdir() if p.is_file() and p.name.startswith(prefix) and p.suffix.lower() != '.xlsx']
-              if not files:
-                  print(prefix, 'NOT FOUND')
-                  continue
-              p = files[0]
-              raw = p.read_bytes()
-              text = None
-              enc_used = None
-              for enc in ('cp949','euc-kr','utf-8-sig','utf-8'):
-                  try:
-                      text = raw.decode(enc)
-                      enc_used = enc
-                      break
-                  except UnicodeDecodeError:
-                      pass
-              print('\n===', prefix, p.name, 'bytes=', len(raw), 'encoding=', enc_used, '===')
-              if text is None:
-                  print('DECODE FAILED')
-                  continue
-              lines = text.splitlines()
-              for idx, line in enumerate(lines[:5], start=1):
-                  print('LINE', idx, 'chars=', len(line), 'repr=', repr(line[:500]))
-                  print('HEX', raw.splitlines()[idx-1][:160].hex(' '))
-          PY
 
       - name: Normalize administrative/legal/mapping files
         run: |
