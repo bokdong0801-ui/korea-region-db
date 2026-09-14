@@ -1,0 +1,2 @@
+source_id,station_name,raw_prefix,corrected_prefix,reason
+kric_urban_station,강촌역,강원도 춘춘시,강원특별자치도 춘천시,KRiC 2026-06-30 원본 도로명주소의 시명 오탈자. 원문은 raw snapshot에 보존하고 지역관계 매칭 시에만 교정.
