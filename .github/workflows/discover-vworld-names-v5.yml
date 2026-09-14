@@ -1,0 +1,30 @@
+name: Discover NGII VWorld Place Names V5
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/discover-vworld-names-v5.yml'
+      - 'scripts/download_vworld_names.py'
+      - 'scripts/inspect_vworld_names.py'
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: python -m pip install --disable-pip-version-check pyshp
+      - run: mkdir -p /tmp/vworld
+      - name: Download official national place names
+        run: python scripts/download_vworld_names.py --snapshot-date 2026-09-14 --out-dir /tmp/vworld
+      - name: Inspect shapefile
+        run: python scripts/inspect_vworld_names.py /tmp/vworld/N3P_H0040000.zip --out /tmp/vworld/schema_report.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vworld-place-names-discovery-20260914
+          path: /tmp/vworld/**
+          if-no-files-found: error
+          retention-days: 30
