@@ -18,19 +18,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
-      - name: Download latest nationwide TPSIS district CSV
+      - name: Download latest nationwide TPSIS files
         run: python scripts/download_tpsis_districts.py --out-dir /tmp/tpsis/raw
       - name: Inspect source encoding and headers
         run: |
           python - <<'PY'
           from pathlib import Path
-          p=next(Path('/tmp/tpsis/raw').glob('tpsis_district_info_*.csv'))
-          b=p.read_bytes()
-          print('BYTES',len(b),'HEAD',repr(b[:120]))
-          for enc in ('utf-8-sig','cp949','euc-kr','utf-8'):
-            try:
-              t=b.decode(enc); print('ENCODING',enc); print('\n'.join(t.splitlines()[:5])); break
-            except UnicodeDecodeError: pass
+          for p in sorted(Path('/tmp/tpsis/raw').glob('BLS5_*.csv')):
+            b=p.read_bytes(); print('\nFILE',p.name,'BYTES',len(b),'HEAD',repr(b[:60]))
+            for enc in ('utf-8-sig','cp949','euc-kr','utf-8'):
+              try:
+                t=b.decode(enc); print('ENCODING',enc); print('\n'.join(t.splitlines()[:5])); break
+              except UnicodeDecodeError: pass
           PY
       - name: Upload raw TPSIS snapshot
         uses: actions/upload-artifact@v4
