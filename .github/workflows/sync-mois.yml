@@ -6,11 +6,14 @@ on:
     paths:
       - '.github/workflows/sync-mois.yml'
       - 'scripts/import_mois_jscode.py'
+      - 'scripts/validate_places.py'
+      - 'scripts/build_master.py'
+      - 'scripts/export_master.py'
 
 jobs:
   sync-latest-jscode:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
 
@@ -72,19 +75,40 @@ jobs:
             --snapshot-date 2026-07-20 \
             --out-dir /tmp/mois/normalized
 
+      - name: Validate normalized official place files
+        run: |
+          python scripts/validate_places.py /tmp/mois/normalized/places_admin.csv
+          python scripts/validate_places.py /tmp/mois/normalized/places_legal_mois.csv
+
+      - name: Build Master DB V1
+        run: |
+          python scripts/build_master.py \
+            --normalized-dir /tmp/mois/normalized \
+            --out-dir /tmp/mois/master
+          cat /tmp/mois/master/build_master_report.json
+
+      - name: Export JSON and MySQL SQL
+        run: |
+          python scripts/export_master.py \
+            --master-dir /tmp/mois/master \
+            --out-dir /tmp/mois/exports
+          ls -lh /tmp/mois/exports
+
       - name: Show normalized counts
         run: |
           cat /tmp/mois/normalized/mois_jscode_import_meta.json
-          wc -l /tmp/mois/normalized/*.csv || true
+          wc -l /tmp/mois/normalized/*.csv /tmp/mois/master/*.csv || true
 
-      - name: Upload source and normalized snapshot artifact
+      - name: Upload full Master DB V1 artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mois-jscode-20260720-snapshot
+          name: korea-region-master-v1-20260720
           path: |
             /tmp/mois/jscode20260720_abolished.zip
             /tmp/mois/normalized/**
+            /tmp/mois/master/**
+            /tmp/mois/exports/**
             /tmp/mois/SHA256SUMS.txt
             /tmp/mois/ZIP_CONTENTS.txt
           if-no-files-found: warn
