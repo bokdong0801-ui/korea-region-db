@@ -1,0 +1,98 @@
+name: Build Korea Geo Master V2
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-geo-v2.yml'
+      - 'scripts/download_kric_stations.py'
+      - 'scripts/import_kric_stations.py'
+      - 'scripts/build_geo_master.py'
+      - 'scripts/download_codego_bjd.py'
+      - 'scripts/import_codego_bjd.py'
+      - 'scripts/import_mois_jscode.py'
+      - 'scripts/build_master.py'
+      - 'scripts/build_history.py'
+      - 'data/rules/relation_exceptions.csv'
+
+jobs:
+  build-geo-v2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: python -m pip install --disable-pip-version-check openpyxl
+      - run: mkdir -p /tmp/mois /tmp/codego /tmp/stations /tmp/geo
+
+      - name: Restore MOIS snapshot
+        id: mois-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/mois/jscode20260720_abolished.zip
+          key: mois-jscode-20260720-c32eb452ae7f2d7300e33b444e8d4c7aaf4faa356444cec87fb545f2a702969d
+      - name: Download MOIS snapshot on cache miss
+        if: steps.mois-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARTICLE='https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000052&nttId=127979'
+          URL='https://www.mois.go.kr/cmm/fms/FileDown.do?atchFileId=FILE_00147311ctH5-ah&fileSn=2'
+          curl -fsSL -A 'Mozilla/5.0' -c /tmp/mois/cookies.txt "$ARTICLE" -o /tmp/mois/article.html
+          curl -fSL -A 'Mozilla/5.0' -b /tmp/mois/cookies.txt -e "$ARTICLE" "$URL" -o /tmp/mois/jscode20260720_abolished.zip
+      - name: Extract MOIS
+        run: |
+          echo 'c32eb452ae7f2d7300e33b444e8d4c7aaf4faa356444cec87fb545f2a702969d  /tmp/mois/jscode20260720_abolished.zip' | sha256sum -c -
+          mkdir -p /tmp/mois/extracted && unzip -oq /tmp/mois/jscode20260720_abolished.zip -d /tmp/mois/extracted
+      - name: Build Master V1 inputs
+        run: |
+          python scripts/download_codego_bjd.py --snapshot-date 2026-09-14 --out-dir /tmp/codego
+          python scripts/import_mois_jscode.py /tmp/mois/extracted --snapshot-date 2026-07-20 --out-dir /tmp/mois/normalized
+          python scripts/import_codego_bjd.py /tmp/codego/codego_bjd_full_2026-09-14.txt --snapshot-date 2026-09-14 --out-dir /tmp/mois/normalized
+          python scripts/build_master.py --normalized-dir /tmp/mois/normalized --rules-dir data/rules --out-dir /tmp/mois/master
+          python scripts/build_history.py --master-dir /tmp/mois/master
+
+      - name: Download official nationwide urban/metro station snapshot
+        run: python scripts/download_kric_stations.py --snapshot-date 2026-06-30 --out-dir /tmp/stations/raw
+      - name: Normalize stations and attach administrative region
+        run: |
+          python scripts/import_kric_stations.py /tmp/stations/raw/kric_urban_stations_2026-06-30.xlsx \
+            --master-places /tmp/mois/master/places_master.csv \
+            --snapshot-date 2026-06-30 --out-dir /tmp/stations/normalized
+          cat /tmp/stations/normalized/station_import_report.json
+      - name: Build Geo Master V2
+        run: |
+          python scripts/build_geo_master.py --base-master /tmp/mois/master --station-dir /tmp/stations/normalized --out-dir /tmp/geo/master
+          cat /tmp/geo/master/geo_master_report.json
+      - name: Station quality gate
+        run: |
+          python - <<'PY'
+          import csv,json
+          r=json.load(open('/tmp/stations/normalized/station_import_report.json',encoding='utf-8'))
+          g=json.load(open('/tmp/geo/master/geo_master_report.json',encoding='utf-8'))
+          assert r['raw_rows'] >= 800, r
+          assert r['physical_stations'] >= 700, r
+          assert g['unresolved_geo_relations'] == 0, g
+          print('STATION QUALITY GATE PASS',r)
+          PY
+      - name: Write V2 manifest
+        run: |
+          python - <<'PY'
+          import hashlib,json,pathlib
+          paths=[]
+          for root in map(pathlib.Path,['/tmp/stations','/tmp/geo']):
+            for p in root.rglob('*'):
+              if p.is_file(): paths.append({'path':str(p),'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          pathlib.Path('/tmp/geo/V2_MANIFEST.json').write_text(json.dumps({'release':'korea-geo-master-v2-stations','station_snapshot':'2026-06-30','files':paths},ensure_ascii=False,indent=2),encoding='utf-8')
+          PY
+      - name: Upload station/geo artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: korea-geo-master-v2-stations-20260914
+          path: |
+            /tmp/stations/**
+            /tmp/geo/**
+            /tmp/mois/master/build_master_report.json
+          if-no-files-found: error
+          retention-days: 90
