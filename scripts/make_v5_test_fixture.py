@@ -17,7 +17,7 @@ def main():
     stem=a.out.parent/'N3P_H0040000';stem.parent.mkdir(parents=True,exist_ok=True)
     w=shapefile.Writer(str(stem),shapeType=shapefile.POINT,encoding='cp949')
     for name,field_type,size in [('UFID','C',34),('NAME','C',100),('DIVI','C',6),('TYPE','C',6),('BJCD','C',10),('SCLS','C',8),('FMTA','C',9)]:
-        w.field(name,fieldType=field_type,size=size)
+        w.field(name,field_type,size=size)
     w.point(126.98,37.57);w.record('TEST-VILLAGE-001','테스트마을','PNN001','PNT007',legal[0]['official_code'],'TEST','TEST')
     w.point(127.00,37.58);w.record('TEST-NATURAL-002','테스트들','PNN001','PNT004',legal[1]['official_code'],'TEST','TEST')
     w.close();stem.with_suffix('.prj').write_text(CRS.from_epsg(4326).to_wkt(),encoding='utf-8')
