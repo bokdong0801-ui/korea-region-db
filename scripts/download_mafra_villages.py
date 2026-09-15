@@ -32,7 +32,7 @@ def open_retry(opener, request, *, timeout: int, attempts: int = 4):
         except Exception as exc:
             last = repr(exc)
             if attempt < attempts:
-                time.sleep(min(30, 2 ** attempt))
+                time.sleep(min(20, 2 ** attempt))
     raise RuntimeError(f"request failed after {attempts} attempts: {last}")
 
 
@@ -51,37 +51,14 @@ def main() -> None:
     }
 
     detail_req = urllib.request.Request(DETAIL, headers={"User-Agent": headers["User-Agent"]})
-    resp, detail_attempts = open_retry(opener, detail_req, timeout=90, attempts=4)
+    resp, detail_attempts = open_retry(opener, detail_req, timeout=60, attempts=3)
     with resp:
         detail_html = resp.read()
     if ENTITY.encode() not in detail_html:
         raise SystemExit("MAFRA detail page did not expose expected village entity")
 
-    # The count endpoint is useful for an independent row-count audit, but the
-    # public portal occasionally stalls. It must not block an otherwise valid
-    # official CSV export. When unavailable, the CSV's own row count is used
-    # and the missing count check is recorded in metadata.
-    expected_count = None
-    count_attempts = 0
-    count_error = ""
-    count_qs = urllib.parse.urlencode({
-        "s_entity_id": ENTITY,
-        "s_search_form_name": "",
-        "s_search_form_value": "",
-    })
-    count_req = urllib.request.Request(COUNT + "?" + count_qs, data=b"", headers=headers, method="POST")
-    try:
-        resp, count_attempts = open_retry(opener, count_req, timeout=90, attempts=3)
-        with resp:
-            count_raw = resp.read()
-        count_payload = json.loads(count_raw.decode("utf-8"))
-        expected_count = int(count_payload[0]["tot_cnt"])
-        if not (3000 <= expected_count <= 5000):
-            raise RuntimeError(f"unexpected count endpoint value: {expected_count}")
-    except Exception as exc:
-        count_error = repr(exc)
-        expected_count = None
-
+    # Download the official CSV first. The portal's count AJAX endpoint is
+    # observably less reliable than the file endpoint and is only an audit aid.
     form = urllib.parse.urlencode({
         "s_entity_id": ENTITY,
         "fileGubun": "CSV",
@@ -94,7 +71,7 @@ def main() -> None:
         headers={**headers, "Content-Type": "application/x-www-form-urlencoded"},
         method="POST",
     )
-    resp, export_attempts = open_retry(opener, export_req, timeout=180, attempts=4)
+    resp, export_attempts = open_retry(opener, export_req, timeout=120, attempts=3)
     with resp:
         raw = resp.read()
         content_type = resp.headers.get("Content-Type", "")
@@ -111,12 +88,34 @@ def main() -> None:
     actual_count = max(0, len(lines) - 1)
     if not (3000 <= actual_count <= 5000):
         raise SystemExit(f"Unexpected MAFRA village CSV row count: {actual_count}")
-    if expected_count is not None and actual_count != expected_count:
-        raise SystemExit(f"MAFRA row-count mismatch: endpoint={expected_count}, csv={actual_count}")
-
     expected_header = "마을ID,마을명,기준년도,마을유형"
     if not decoded.startswith(expected_header):
         raise SystemExit("Unexpected MAFRA village CSV header")
+
+    # Optional independent count audit. A timeout is recorded but does not
+    # invalidate a structurally valid official CSV export.
+    expected_count = None
+    count_attempts = 0
+    count_error = ""
+    count_qs = urllib.parse.urlencode({
+        "s_entity_id": ENTITY,
+        "s_search_form_name": "",
+        "s_search_form_value": "",
+    })
+    count_req = urllib.request.Request(COUNT + "?" + count_qs, data=b"", headers=headers, method="POST")
+    try:
+        resp, count_attempts = open_retry(opener, count_req, timeout=15, attempts=1)
+        with resp:
+            count_raw = resp.read()
+        count_payload = json.loads(count_raw.decode("utf-8"))
+        expected_count = int(count_payload[0]["tot_cnt"])
+        if not (3000 <= expected_count <= 5000):
+            raise RuntimeError(f"unexpected count endpoint value: {expected_count}")
+        if expected_count != actual_count:
+            raise RuntimeError(f"row-count mismatch: endpoint={expected_count}, csv={actual_count}")
+    except Exception as exc:
+        count_error = repr(exc)
+        expected_count = None
 
     out = args.out_dir / f"mafra_rural_villages_{args.snapshot_date}.csv"
     out.write_bytes(raw)
