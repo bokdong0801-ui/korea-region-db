@@ -51,15 +51,19 @@ jobs:
           from pathlib import Path
           p=Path('scripts/build_region_pages_release_v2.py')
           lines=p.read_text(encoding='utf-8').splitlines()
-          for i,line in enumerate(lines):
-              if "if p.get('latitude') and p.get('longitude'):z.append" in line:
-                  lines[i:i+1]=[
+          fixed=[]
+          for line in lines:
+              if "z.append(('역 소재 지역',chips(rel(pid,'STATION_IN')))" in line:
+                  fixed.append("            z.append(('역 소재 지역',chips(rel(pid,'STATION_IN'))))")
+              elif "if p.get('latitude') and p.get('longitude'):z.append" in line:
+                  fixed.extend([
                       "            if p.get('latitude') and p.get('longitude'):",
                       "                lat=esc(p.get('latitude')); lon=esc(p.get('longitude'))",
                       "                z.append(('좌표','<div class=\"coordinate\"><div><span>위도</span><strong>'+lat+'</strong></div><div><span>경도</span><strong>'+lon+'</strong></div></div>'))",
-                  ]
-                  break
-          p.write_text('\n'.join(lines)+'\n',encoding='utf-8')
+                  ])
+              else:
+                  fixed.append(line)
+          p.write_text('\n'.join(fixed)+'\n',encoding='utf-8')
           PY
           python -m py_compile scripts/build_region_pages_release_v2.py
 
