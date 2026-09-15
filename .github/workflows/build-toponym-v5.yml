@@ -1,4 +1,4 @@
-name: Build Korea Toponym Geo Master V5
+name: Build Korea Natural Toponym Geo Master V5
 
 on:
   workflow_dispatch:
@@ -22,52 +22,56 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - run: python -m pip install --disable-pip-version-check pyshp pyproj
-      - run: mkdir -p /tmp/v4 /tmp/vworld /tmp/toponym /tmp/v5/master /tmp/v5
-      - name: Download audited V4 artifact
+      - run: mkdir -p /tmp/base /tmp/vworld /tmp/toponym /tmp/v5/master /tmp/v5
+      - name: Download audited MAFRA V5 artifact
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           curl -fL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/10355006058/zip" -o /tmp/v4.zip
-          unzip -oq /tmp/v4.zip -d /tmp/v4
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/10381378865/zip" -o /tmp/base.zip
+          unzip -oq /tmp/base.zip -d /tmp/base
+          test -s /tmp/base/v5/master/places_geo_master.csv
           python - <<'PY'
           import json
-          r=json.load(open('/tmp/v4/v4/master/geo_master_v4_report.json',encoding='utf-8'))
-          assert r['places']==65469 and r['relations']==124343 and r['unresolved_geo_relations']==0, r
-          print('AUDITED V4 INPUT PASS')
+          r=json.load(open('/tmp/base/v5/master/geo_master_v5_report.json',encoding='utf-8'))
+          assert r['places']==68790 and r['relations']==127664 and r['added_village_places']==3321, r
+          assert r['unresolved_geo_relations']==0 and r['duplicate_village_place_ids']==0, r
+          print('AUDITED MAFRA V5 INPUT PASS')
           PY
       - name: Acquire official NGII/VWorld national place-name SHP
-        run: python scripts/download_vworld_names.py --snapshot-date 2026-09-14 --out-dir /tmp/vworld
-      - name: Normalize official place names and exact BJCD links
+        run: python scripts/download_vworld_names.py --snapshot-date 2026-09-15 --out-dir /tmp/vworld
+      - name: Normalize NGII natural names only and exact BJCD links
         run: |
           python scripts/import_ngii_place_names.py /tmp/vworld/N3P_H0040000.zip \
-            --v4-places /tmp/v4/v4/master/places_geo_master.csv \
-            --snapshot-date 2026-09-14 --out-dir /tmp/toponym
+            --v4-places /tmp/base/v5/master/places_geo_master.csv \
+            --snapshot-date 2026-09-15 --out-dir /tmp/toponym --natural-only
           cat /tmp/toponym/toponym_import_report.json
-      - name: Build integrated Geo Master V5
+      - name: Build integrated MAFRA plus NGII natural-name master
         run: |
-          python scripts/augment_geo_v5_toponyms.py --v4-dir /tmp/v4/v4/master --toponym-dir /tmp/toponym --out-dir /tmp/v5/master
+          python scripts/augment_geo_v5_toponyms.py --v4-dir /tmp/base/v5/master --toponym-dir /tmp/toponym --out-dir /tmp/v5/master
           cat /tmp/v5/master/geo_master_v5_report.json
-      - name: V5 production quality gate
+      - name: Natural toponym production quality gate
         run: |
           python - <<'PY'
           import json
           i=json.load(open('/tmp/toponym/toponym_import_report.json',encoding='utf-8'))
           g=json.load(open('/tmp/v5/master/geo_master_v5_report.json',encoding='utf-8'))
+          assert i['natural_only'] is True, i
           assert i['places']>1000, i
-          assert i['villages']>0, i
           assert i['invalid_records']==0 and i['duplicate_ufid']==0, i
           assert i['unmatched_bjcd']==0, i
           assert i['relations']==i['places'], i
-          assert g['base_v4_places']==65469 and g['base_v4_relations']==124343, g
-          assert g['places']==65469+i['places'], (g,i)
-          assert g['relations']==124343+i['relations'], (g,i)
+          assert i['by_divi']=={'PNN001':i['places']}, i
+          assert g['base_v4_places']==68790 and g['base_v4_relations']==127664, g
+          assert g['places']==68790+i['places'], (g,i)
+          assert g['relations']==127664+i['relations'], (g,i)
           assert g['added_toponyms']==i['places'] and g['added_toponym_relations']==i['relations'], (g,i)
           assert g['unresolved_geo_relations']==0, g
-          print('GEO MASTER V5 TOPONYM QUALITY GATE PASS')
+          print('MAFRA V5 + NGII NATURAL TOPONYM QUALITY GATE PASS')
           PY
-      - name: Write V5 manifest
+      - name: Write V5 natural-toponym manifest
         run: |
           python - <<'PY'
           import hashlib,json,pathlib
@@ -76,14 +80,15 @@ jobs:
           for root in roots:
             for p in sorted(root.rglob('*')):
               if p.is_file():files.append({'path':str(p),'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
-          pathlib.Path('/tmp/v5/V5_MANIFEST.json').write_text(json.dumps({'release':'korea-geo-master-v5-toponym','base_v4_artifact_id':10355006058,'source':'NGII continuous numeric topographic map place-name layer N3P_H0040000','snapshot_date':'2026-09-14','relation_policy':'exact BJCD only','files':files},ensure_ascii=False,indent=2),encoding='utf-8')
+          pathlib.Path('/tmp/v5/V5_NGII_NATURAL_TOPONYM_MANIFEST.json').write_text(json.dumps({'release':'korea-geo-master-v5-mafra-ngii-natural-toponym','base_v5_artifact_id':10381378865,'source':'NGII continuous numeric topographic map place-name layer N3P_H0040000 via VWorld','selection':'DIVI=PNN001 only','snapshot_date':'2026-09-15','relation_policy':'exact BJCD only; no fuzzy name/proximity inference','files':files},ensure_ascii=False,indent=2),encoding='utf-8')
           PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: korea-geo-master-v5-toponym-20260914
+          name: korea-geo-master-v5-mafra-ngii-natural-toponym-20260915
           path: |
             /tmp/vworld/**
             /tmp/toponym/**
             /tmp/v5/**
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 90
