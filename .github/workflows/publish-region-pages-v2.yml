@@ -1,0 +1,104 @@
+name: Publish EnglishPT Region Pages V2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/build_region_pages_release_v2.py'
+      - 'web/region-pages-v2/region-base.css'
+      - '.github/workflows/publish-region-pages-v2.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  build-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download audited V5 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: korea-mafra-village-v5-audit-20260915
+          path: /tmp/v5-artifact
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: bokdong0801-ui/korea-region-db
+          run-id: 34931940805
+
+      - name: Locate V5 master
+        id: master
+        shell: bash
+        run: |
+          set -euo pipefail
+          MASTER="$(dirname "$(find /tmp/v5-artifact -type f -name places_geo_master.csv -print -quit)")"
+          test -f "$MASTER/relations_geo_master.csv"
+          test -f "$MASTER/aliases_geo_master.csv"
+          echo "path=$MASTER" >> "$GITHUB_OUTPUT"
+          echo "Master: $MASTER"
+
+      - name: Build 26,937 region pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/build_region_pages_release_v2.py \
+            --master '${{ steps.master.outputs.path }}' \
+            --out /tmp/region-site \
+            --base-css web/region-pages-v2/region-base.css
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          q=json.loads(Path('/tmp/region-site/manifest/qa.json').read_text())
+          assert q['pass'], q
+          assert q['entity_pages']==26937, q
+          print(json.dumps(q, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Package deployable region subtree
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/release
+          tar -C /tmp/region-site -czf /tmp/release/region-pages.tar.gz \
+            region station newtown district search assets sitemaps
+          cp /tmp/region-site/manifest/qa.json /tmp/release/region-pages-qa.json
+          sha256sum /tmp/release/region-pages.tar.gz | tee /tmp/release/region-pages.tar.gz.sha256
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          q=json.loads(Path('/tmp/release/region-pages-qa.json').read_text())
+          meta={
+            'release':'V2-ENGLISHPT-20260915',
+            'base_url':'https://englishpt.kr',
+            'entity_pages':q['entity_pages'],
+            'category_counts':q['category_counts'],
+            'indexable':q['indexable'],
+            'source_artifact':'korea-mafra-village-v5-audit-20260915',
+            'source_run':34931940805,
+          }
+          Path('/tmp/release/release.json').write_text(json.dumps(meta,ensure_ascii=False,indent=2),encoding='utf-8')
+          PY
+          ls -lh /tmp/release
+
+      - name: Publish release branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch --orphan region-pages-release
+          git rm -rf . || true
+          cp /tmp/release/region-pages.tar.gz .
+          cp /tmp/release/region-pages.tar.gz.sha256 .
+          cp /tmp/release/region-pages-qa.json .
+          cp /tmp/release/release.json .
+          printf '# EnglishPT Region Pages Release\n\nGenerated from audited V5. Deploy bundle: region-pages.tar.gz\n' > README.md
+          git add README.md region-pages.tar.gz region-pages.tar.gz.sha256 region-pages-qa.json release.json
+          git commit -m 'Publish EnglishPT region pages V2'
+          git push origin HEAD:region-pages-release --force
