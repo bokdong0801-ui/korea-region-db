@@ -19,12 +19,13 @@ jobs:
       - run: python -m pip install --disable-pip-version-check pyshp
       - run: mkdir -p /tmp/vworld
       - name: Download official national place names
-        run: python scripts/download_vworld_names.py --snapshot-date 2026-09-14 --out-dir /tmp/vworld
+        run: python scripts/download_vworld_names.py --snapshot-date 2026-09-15 --out-dir /tmp/vworld
       - name: Inspect shapefile
         run: python scripts/inspect_vworld_names.py /tmp/vworld/N3P_H0040000.zip --out /tmp/vworld/schema_report.json
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: vworld-place-names-discovery-20260914
+          name: vworld-place-names-discovery-20260915
           path: /tmp/vworld/**
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
