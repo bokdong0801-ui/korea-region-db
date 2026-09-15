@@ -55,6 +55,8 @@ jobs:
           for line in lines:
               if "z.append(('역 소재 지역',chips(rel(pid,'STATION_IN')))" in line:
                   fixed.append("            z.append(('역 소재 지역',chips(rel(pid,'STATION_IN'))))")
+              elif "elif t in DISTRICT_TYPES:z.append(('소재 행정구역',chips(rel(pid,'DISTRICT_IN')))" in line:
+                  fixed.append("        elif t in DISTRICT_TYPES:z.append(('소재 행정구역',chips(rel(pid,'DISTRICT_IN'))))")
               elif "if p.get('latitude') and p.get('longitude'):z.append" in line:
                   fixed.extend([
                       "            if p.get('latitude') and p.get('longitude'):",
