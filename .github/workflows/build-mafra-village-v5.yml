@@ -1,0 +1,79 @@
+name: Build MAFRA Rural Village V5 Overlay
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-mafra-village-v5.yml'
+      - 'scripts/download_mafra_villages.py'
+      - 'scripts/import_mafra_villages.py'
+      - 'scripts/augment_geo_v5_villages.py'
+
+jobs:
+  build-mafra-village-v5:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: mkdir -p /tmp/v4 /tmp/mafra/raw /tmp/mafra/normalized /tmp/v5/master
+      - name: Download audited V4 artifact
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fL -H "Authorization: Bearer $GITHUB_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/10355006058/zip" -o /tmp/v4.zip
+          unzip -oq /tmp/v4.zip -d /tmp/v4
+          test -s /tmp/v4/v4/master/places_geo_master.csv
+      - name: Download official MAFRA nationwide rural village CSV
+        run: python scripts/download_mafra_villages.py --snapshot-date 2026-09-15 --out-dir /tmp/mafra/raw
+      - name: Normalize and map village IDs to legal regions
+        shell: bash
+        run: |
+          RAW=$(find /tmp/mafra/raw -name 'mafra_rural_villages_*.csv' | head -n1)
+          test -n "$RAW"
+          python scripts/import_mafra_villages.py "$RAW" \
+            --v4-places /tmp/v4/v4/master/places_geo_master.csv \
+            --snapshot-date 2026-09-15 --out-dir /tmp/mafra/normalized
+          cat /tmp/mafra/normalized/village_import_report.json
+      - name: MAFRA source quality gate
+        run: |
+          python - <<'PY'
+          import json
+          r=json.load(open('/tmp/mafra/normalized/village_import_report.json',encoding='utf-8'))
+          assert 3000 <= r['source_rows'] <= 5000, r
+          assert r['unique_village_ids'] > 1000, r
+          assert r['bad_ids'] == 0, r
+          assert r['relations'] + r['unresolved_regions'] == r['places'], r
+          print('MAFRA VILLAGE SOURCE QUALITY GATE PASS',r)
+          PY
+      - name: Overlay only when every village region resolves
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json,sys
+          r=json.load(open('/tmp/mafra/normalized/village_import_report.json',encoding='utf-8'))
+          if r['unresolved_regions']:
+              print('AUDIT_REQUIRED unresolved_regions=',r['unresolved_regions'])
+              sys.exit(2)
+          PY
+          python scripts/augment_geo_v5_villages.py \
+            --v4-dir /tmp/v4/v4/master \
+            --village-dir /tmp/mafra/normalized \
+            --out-dir /tmp/v5/master
+      - name: Upload MAFRA village audit artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: korea-mafra-village-v5-audit-20260915
+          path: |
+            /tmp/mafra/**
+            /tmp/v5/**
+          if-no-files-found: warn
+          retention-days: 90
