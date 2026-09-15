@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import argparse,csv,hashlib,json,tempfile,zipfile
+import argparse,csv,json,tempfile,zipfile
 from collections import Counter
 from pathlib import Path
 import shapefile
@@ -26,10 +26,16 @@ def relation_type(t):return 'VILLAGE_IN' if t=='PNT007' else 'TOPONYM_IN'
 def norm(v):return '' if v is None else str(v).strip()
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('source_zip',type=Path);ap.add_argument('--v4-places',type=Path,required=True);ap.add_argument('--snapshot-date',default='2026-09-14');ap.add_argument('--out-dir',type=Path,required=True);a=ap.parse_args();a.out_dir.mkdir(parents=True,exist_ok=True)
-    v4=read_csv(a.v4_places)
-    legal={r['official_code']:r for r in v4 if r.get('place_id','').startswith('bjd:') and r.get('official_code')}
-    places=[];rels=[];aliases=[];details=[];unmatched=[];invalid=[];seen=set();dup=0
+    ap=argparse.ArgumentParser()
+    ap.add_argument('source_zip',type=Path)
+    ap.add_argument('--v4-places',type=Path,required=True,help='Audited base master places CSV; name retained for backward compatibility')
+    ap.add_argument('--snapshot-date',default='2026-09-15')
+    ap.add_argument('--out-dir',type=Path,required=True)
+    ap.add_argument('--natural-only',action='store_true',help='Import only official NGII natural names (DIVI=PNN001); raw ZIP remains untouched')
+    a=ap.parse_args();a.out_dir.mkdir(parents=True,exist_ok=True)
+    base=read_csv(a.v4_places)
+    legal={r['official_code']:r for r in base if r.get('place_id','').startswith('bjd:') and r.get('official_code')}
+    places=[];rels=[];aliases=[];details=[];unmatched=[];invalid=[];seen=set();dup=0;raw_seen=0;excluded_non_natural=0
     with tempfile.TemporaryDirectory() as td:
         with zipfile.ZipFile(a.source_zip) as z:z.extractall(td)
         shps=list(Path(td).rglob('*.shp'))
@@ -45,8 +51,12 @@ def main():
             crs=CRS.from_wkt(prj.read_text(errors='ignore'));source_crs=crs.to_string();transformer=Transformer.from_crs(crs,CRS.from_epsg(4326),always_xy=True)
         idx={k:fields.index(k) for k in fields}
         for rec,shape in zip(reader.iterRecords(),reader.iterShapes()):
+            raw_seen+=1
             row={k:norm(rec[i]) for k,i in idx.items()}
             ufid=row.get('UFID','');name=row.get('NAME','');divi=row.get('DIVI','');typ=row.get('TYPE','');bjcd=''.join(ch for ch in row.get('BJCD','') if ch.isdigit())
+            if a.natural_only and divi!='PNN001':
+                excluded_non_natural+=1
+                continue
             if not ufid or not name:
                 invalid.append({'ufid':ufid,'name':name,'bjcd':bjcd,'reason':'MISSING_UFID_OR_NAME'});continue
             if ufid in seen:dup+=1;continue
@@ -64,13 +74,15 @@ def main():
             if target:
                 rels.append({'from_place_id':pid,'to_place_id':target['place_id'],'relation_type':relation_type(typ),'confidence':'1.0','legal_status':'CURRENT','valid_from':'','valid_to':'','source_id':'ngii_vworld_h0040000','source_snapshot_date':a.snapshot_date})
             else:
-                unmatched.append({'place_id':pid,'ufid':ufid,'name_ko':name,'divi':divi,'type':typ,'bjcd':bjcd,'reason':'BJCD_NOT_FOUND_IN_V4' if bjcd else 'MISSING_BJCD'})
+                unmatched.append({'place_id':pid,'ufid':ufid,'name_ko':name,'divi':divi,'type':typ,'bjcd':bjcd,'reason':'BJCD_NOT_FOUND_IN_BASE' if bjcd else 'MISSING_BJCD'})
             details.append({'place_id':pid,'ufid':ufid,'name_ko':name,'divi':divi,'divi_label':DIVI_LABEL.get(divi,''),'type':typ,'type_label':TYPE_LABEL.get(typ,''),'bjcd':bjcd,'scls':row.get('SCLS',''),'fmta':row.get('FMTA',''),'source_crs':source_crs,'source_id':'ngii_vworld_h0040000','source_snapshot_date':a.snapshot_date})
     pf=['place_id','place_type','hierarchy_level','name_ko','full_name_ko','official_code','parent_place_id','legal_status','valid_from','valid_to','source_id','validity_source_id','source_snapshot_date','latitude','longitude']
     rf=['from_place_id','to_place_id','relation_type','confidence','legal_status','valid_from','valid_to','source_id','source_snapshot_date'];af=['place_id','alias','alias_type','source_id']
     df=['place_id','ufid','name_ko','divi','divi_label','type','type_label','bjcd','scls','fmta','source_crs','source_id','source_snapshot_date'];uf=['place_id','ufid','name_ko','divi','type','bjcd','reason'];iv=['ufid','name','bjcd','reason']
     write_csv(a.out_dir/'places_toponym.csv',places,pf);write_csv(a.out_dir/'toponym_relations.csv',rels,rf);write_csv(a.out_dir/'toponym_aliases.csv',aliases,af);write_csv(a.out_dir/'toponym_details.csv',details,df);write_csv(a.out_dir/'toponym_unmatched_bjcd.csv',unmatched,uf);write_csv(a.out_dir/'toponym_invalid.csv',invalid,iv)
     pc=Counter(r['place_type'] for r in places);tc=Counter(r['type'] for r in details);dc=Counter(r['divi'] for r in details)
-    report={'source_records':len(details)+len(invalid)+dup,'places':len(places),'relations':len(rels),'aliases':len(aliases),'unmatched_bjcd':len(unmatched),'invalid_records':len(invalid),'duplicate_ufid':dup,'villages':pc.get('VILLAGE',0),'by_place_type':dict(sorted(pc.items())),'by_divi':dict(sorted(dc.items())),'by_type':dict(sorted(tc.items())),'exact_bjcd_match_rate':round(len(rels)/len(places),6) if places else 0,'policy':'Exact BJCD relation only; no name or proximity inference'}
+    report={'raw_records_seen':raw_seen,'source_records':len(details)+len(invalid)+dup,'selected_records':len(details)+len(invalid)+dup,'excluded_non_natural':excluded_non_natural,'natural_only':a.natural_only,'places':len(places),'relations':len(rels),'aliases':len(aliases),'unmatched_bjcd':len(unmatched),'invalid_records':len(invalid),'duplicate_ufid':dup,'villages':pc.get('VILLAGE',0),'natural_toponyms':pc.get('NATURAL_TOPONYM',0),'by_place_type':dict(sorted(pc.items())),'by_divi':dict(sorted(dc.items())),'by_type':dict(sorted(tc.items())),'exact_bjcd_match_rate':round(len(rels)/len(places),6) if places else 0,'policy':'Exact BJCD relation only; no name or proximity inference'}
+    if a.natural_only and raw_seen != report['selected_records'] + excluded_non_natural:
+        raise SystemExit(f'Natural-only accounting mismatch: {report}')
     (a.out_dir/'toponym_import_report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8');print(json.dumps(report,ensure_ascii=False,indent=2))
 if __name__=='__main__':main()
