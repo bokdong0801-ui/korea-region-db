@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>대한민국 전국 지역검색 V1</title>
+<meta name="description" content="시·도, 시·군·구, 읍·면·동, 리, 역, 신도시, 개발지구를 통합 검색하는 전국 지역 데이터 탐색기입니다.">
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<header class="topbar"><div class="wrap topbar-inner"><a class="brand" href="index.html">KOREA REGION DB</a><span class="badge">SEARCH V1</span></div></header>
+<main class="wrap">
+<section class="hero"><p class="eyebrow">대한민국 지역 데이터 탐색</p><h1>전국 지역을 하나의 DB에서<br>찾고 연결합니다.</h1><p class="lead">행정구역·법정동·리·역·신도시·개발지구를 한 번에 검색합니다. 마을·자연지명은 V5 데이터가 연결되면 같은 화면에 자동 추가됩니다.</p></section>
+<section class="panel search-panel">
+<label class="search-label" for="q">지역명 통합검색</label>
+<div class="search-row"><input id="q" autocomplete="off" placeholder="예: 송현동, 동탄2, 강남역, 판교"><button id="clearBtn" type="button">초기화</button></div>
+<div id="filters" class="filters" aria-label="지역 유형 필터"></div>
+<label class="check"><input id="includeOld" type="checkbox"> 폐지·과거 지역도 함께 보기</label>
+</section>
+<section class="panel"><div class="section-head"><div><p class="eyebrow">계층 탐색</p><h2>시·도 → 하위 지역</h2></div><p class="muted">선택한 지역의 직계 하위 지역을 단계별로 탐색합니다.</p></div><div id="hierarchy" class="hierarchy"></div></section>
+<section class="stats" id="stats"></section>
+<section class="results-section"><div class="section-head"><div><p class="eyebrow">검색 결과</p><h2 id="resultTitle">전체 지역</h2></div><span id="resultCount" class="count"></span></div><div id="results" class="results"></div><button id="moreBtn" class="more" type="button" hidden>더 보기</button></section>
+</main>
+<footer><div class="wrap">Data source: korea-region-db · 공식 원천 기반</div></footer>
+<script src="assets/app.js" defer></script>
+</body></html>
