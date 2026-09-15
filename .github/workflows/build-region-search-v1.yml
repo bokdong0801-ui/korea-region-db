@@ -20,8 +20,8 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - name: Prepare directories
-        run: mkdir -p /tmp/v4 /tmp/site
-      - name: Download audited V4 artifact
+        run: mkdir -p /tmp/v5 /tmp/site
+      - name: Download audited MAFRA V5 artifact
         env:
           GITHUB_TOKEN: ${{ github.token }}
         shell: bash
@@ -31,55 +31,74 @@ jobs:
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/10355006058/zip" \
-            -o /tmp/v4.zip
-          unzip -oq /tmp/v4.zip -d /tmp/v4
-          test -s /tmp/v4/v4/master/places_geo_master.csv
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/10381378865/zip" \
+            -o /tmp/v5.zip
+          unzip -oq /tmp/v5.zip -d /tmp/v5
+          test -s /tmp/v5/v5/master/places_geo_master.csv
+          test -s /tmp/v5/v5/master/relations_geo_master.csv
+          test -s /tmp/v5/v5/master/geo_master_v5_report.json
+          test -s /tmp/v5/mafra/normalized/village_exact_ci_report.json
           python - <<'PY'
           import json
-          r=json.load(open('/tmp/v4/v4/master/geo_master_v4_report.json',encoding='utf-8'))
-          assert r['places']==65469 and r['relations']==124343 and r['unresolved_geo_relations']==0, r
-          print('AUDITED V4 INPUT PASS',r)
+          g=json.load(open('/tmp/v5/v5/master/geo_master_v5_report.json',encoding='utf-8'))
+          m=json.load(open('/tmp/v5/mafra/normalized/village_exact_ci_report.json',encoding='utf-8'))
+          assert m['status']=='PASS', m
+          assert m['standard_ids_resolved']==3306, m
+          assert m['official_8digit_scope_resolved']==15, m
+          assert m['total_resolved']==3321, m
+          assert m['unresolved_regions']==0 and m['bad_ids']==0, m
+          assert g['places']==68790, g
+          assert g['relations']==127664, g
+          assert g['added_village_places']==3321, g
+          assert g['added_village_relations']==3321, g
+          assert g['unresolved_geo_relations']==0, g
+          assert g['duplicate_village_place_ids']==0, g
+          print('AUDITED V5 INPUT PASS',g,m)
           PY
       - name: Copy site shell
         run: cp -R web/region-search-v1/. /tmp/site/
-      - name: Build browser search data
+      - name: Build browser search data from V5
         run: |
           python scripts/build_region_search_v1.py \
-            --geo-dir /tmp/v4/v4/master \
+            --geo-dir /tmp/v5/v5/master \
             --site-dir /tmp/site \
-            --source-release V4
-      - name: Region Search V1 quality gate
+            --source-release V5-MAFRA-20260915
+      - name: Region Search V1 V5 quality gate
         run: |
           python - <<'PY'
           import json,pathlib
           root=pathlib.Path('/tmp/site')
           meta=json.load(open(root/'data/meta.json',encoding='utf-8'))
           idx=json.load(open(root/'data/search-index.json',encoding='utf-8'))
-          assert meta['places']==65469, meta
-          assert meta['relations']==124343, meta
+          assert meta['source_release']=='V5-MAFRA-20260915', meta
+          assert meta['places']==68790, meta
+          assert meta['relations']==127664, meta
           assert meta['unresolved_relations']==0, meta
-          assert len(idx)==65469, len(idx)
+          assert len(idx)==68790, len(idx)
+          assert meta['category_counts'].get('VILLAGE')==3321, meta
+          assert meta['place_type_counts'].get('RURAL_VILLAGE')==3051, meta
+          assert meta['place_type_counts'].get('RURAL_CENTER')==270, meta
           assert sum(1 for x in idx if x['t']=='NEWTOWN')==22
           assert sum(1 for x in idx if x['t']=='STATION')==1052
+          assert sum(1 for x in idx if x['t'] in {'RURAL_VILLAGE','RURAL_CENTER'})==3321
           assert all((root/'data/details'/f'{i:03d}.json').exists() for i in range(128))
           assert (root/'index.html').stat().st_size>500
           assert (root/'place.html').stat().st_size>300
           assert (root/'assets/app.js').stat().st_size>2000
-          print('REGION SEARCH V1 QUALITY GATE PASS',meta)
+          print('REGION SEARCH V1 V5 QUALITY GATE PASS',meta)
           PY
-      - name: Package preview site
+      - name: Package V5 preview site
         run: |
           cd /tmp/site
-          zip -qr /tmp/korea-region-search-v1-20260915.zip .
-          sha256sum /tmp/korea-region-search-v1-20260915.zip | tee /tmp/REGION_SEARCH_V1_SHA256.txt
-          cp /tmp/REGION_SEARCH_V1_SHA256.txt /tmp/site/
-      - name: Upload Region Search V1 artifact
+          zip -qr /tmp/korea-region-search-v1-v5-20260915.zip .
+          sha256sum /tmp/korea-region-search-v1-v5-20260915.zip | tee /tmp/REGION_SEARCH_V1_V5_SHA256.txt
+          cp /tmp/REGION_SEARCH_V1_V5_SHA256.txt /tmp/site/
+      - name: Upload Region Search V1 V5 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: korea-region-search-v1-20260915
+          name: korea-region-search-v1-v5-20260915
           path: |
             /tmp/site/**
-            /tmp/korea-region-search-v1-20260915.zip
+            /tmp/korea-region-search-v1-v5-20260915.zip
           if-no-files-found: error
           retention-days: 90
