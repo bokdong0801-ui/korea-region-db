@@ -4,7 +4,11 @@ import argparse,csv,json,hashlib
 from collections import defaultdict,Counter
 from pathlib import Path
 
-ADMIN_TYPES={'SIDO','SIGUNGU','LEGAL_EUP','LEGAL_MYEON','LEGAL_DONG','LEGAL_RI','ADMIN_DONG'}
+ADMIN_TYPES={
+    'SIDO','SIGUNGU','LEGAL_EUP','LEGAL_MYEON','LEGAL_DONG','LEGAL_RI',
+    'ADMIN_SIDO','ADMIN_SIGUNGU','ADMIN_EUP','ADMIN_MYEON','ADMIN_DONG'
+}
+VILLAGE_TYPES={'VILLAGE','RURAL_VILLAGE','RURAL_CENTER','RURAL_PLACE'}
 
 def read_csv(path:Path):
     if not path.exists() or path.stat().st_size==0:return []
@@ -20,9 +24,9 @@ def category(t:str)->str:
     if t in ADMIN_TYPES:return 'ADMIN'
     if t=='STATION':return 'STATION'
     if t=='NEWTOWN':return 'NEWTOWN'
-    if t=='VILLAGE':return 'VILLAGE'
+    if t in VILLAGE_TYPES:return 'VILLAGE'
     if t=='NATURAL_TOPONYM':return 'TOPONYM'
-    if any(k in t for k in ('DISTRICT','DEVELOPMENT','HOUSING','INDUSTRIAL','ECONOMIC','INNOVATION','COMPLEX')):return 'DISTRICT'
+    if any(k in t for k in ('DISTRICT','DEVELOPMENT','HOUSING','INDUSTRIAL','ECONOMIC','INNOVATION','COMPLEX','SPECIAL_ZONE')):return 'DISTRICT'
     return 'OTHER'
 
 def main():
@@ -45,10 +49,10 @@ def main():
 
     basic={}
     index=[]
-    counts=Counter()
+    counts=Counter(); type_counts=Counter()
     current=0
     for r in places:
-        pid=r['place_id']; t=r.get('place_type','OTHER'); cat=category(t); counts[cat]+=1
+        pid=r['place_id']; t=r.get('place_type','OTHER'); cat=category(t); counts[cat]+=1; type_counts[t]+=1
         if r.get('legal_status')=='CURRENT': current+=1
         item={
             'id':pid,'n':r.get('name_ko',''),'f':r.get('full_name_ko',''),'t':t,'g':cat,
@@ -75,6 +79,7 @@ def main():
     meta={
         'site_version':'region-search-v1','source_release':a.source_release,'places':len(places),'current_places':current,
         'relations':len(rels),'aliases':len(aliases),'unresolved_relations':0,'category_counts':dict(sorted(counts.items())),
+        'place_type_counts':dict(sorted(type_counts.items())),
         'v5_toponym_ready':counts['VILLAGE']>0 or counts['TOPONYM']>0,
         'generated_files':130
     }
