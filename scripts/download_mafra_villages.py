@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import http.cookiejar
 import json
+import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -23,6 +24,18 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def open_retry(opener, request, *, timeout: int, attempts: int = 4):
+    last = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return opener.open(request, timeout=timeout), attempt
+        except Exception as exc:
+            last = repr(exc)
+            if attempt < attempts:
+                time.sleep(min(30, 2 ** attempt))
+    raise RuntimeError(f"request failed after {attempts} attempts: {last}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--snapshot-date", default="2026-09-15")
@@ -32,25 +45,42 @@ def main() -> None:
 
     jar = http.cookiejar.CookieJar()
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
-    headers = {"User-Agent": "Mozilla/5.0", "Referer": DETAIL}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/152 Safari/537.36",
+        "Referer": DETAIL,
+    }
 
-    with opener.open(urllib.request.Request(DETAIL, headers={"User-Agent": "Mozilla/5.0"}), timeout=60) as r:
-        detail_html = r.read()
+    detail_req = urllib.request.Request(DETAIL, headers={"User-Agent": headers["User-Agent"]})
+    resp, detail_attempts = open_retry(opener, detail_req, timeout=90, attempts=4)
+    with resp:
+        detail_html = resp.read()
     if ENTITY.encode() not in detail_html:
         raise SystemExit("MAFRA detail page did not expose expected village entity")
 
+    # The count endpoint is useful for an independent row-count audit, but the
+    # public portal occasionally stalls. It must not block an otherwise valid
+    # official CSV export. When unavailable, the CSV's own row count is used
+    # and the missing count check is recorded in metadata.
+    expected_count = None
+    count_attempts = 0
+    count_error = ""
     count_qs = urllib.parse.urlencode({
         "s_entity_id": ENTITY,
         "s_search_form_name": "",
         "s_search_form_value": "",
     })
-    req = urllib.request.Request(COUNT + "?" + count_qs, data=b"", headers=headers, method="POST")
-    with opener.open(req, timeout=60) as r:
-        count_raw = r.read()
-    count_payload = json.loads(count_raw.decode("utf-8"))
-    expected_count = int(count_payload[0]["tot_cnt"])
-    if not (3000 <= expected_count <= 5000):
-        raise SystemExit(f"Unexpected MAFRA village row count: {expected_count}")
+    count_req = urllib.request.Request(COUNT + "?" + count_qs, data=b"", headers=headers, method="POST")
+    try:
+        resp, count_attempts = open_retry(opener, count_req, timeout=90, attempts=3)
+        with resp:
+            count_raw = resp.read()
+        count_payload = json.loads(count_raw.decode("utf-8"))
+        expected_count = int(count_payload[0]["tot_cnt"])
+        if not (3000 <= expected_count <= 5000):
+            raise RuntimeError(f"unexpected count endpoint value: {expected_count}")
+    except Exception as exc:
+        count_error = repr(exc)
+        expected_count = None
 
     form = urllib.parse.urlencode({
         "s_entity_id": ENTITY,
@@ -58,16 +88,17 @@ def main() -> None:
         "s_search_form_name": "",
         "s_search_form_value": "",
     }).encode("utf-8")
-    req = urllib.request.Request(
+    export_req = urllib.request.Request(
         EXPORT,
         data=form,
         headers={**headers, "Content-Type": "application/x-www-form-urlencoded"},
         method="POST",
     )
-    with opener.open(req, timeout=120) as r:
-        raw = r.read()
-        content_type = r.headers.get("Content-Type", "")
-        content_disposition = r.headers.get("Content-Disposition", "")
+    resp, export_attempts = open_retry(opener, export_req, timeout=180, attempts=4)
+    with resp:
+        raw = resp.read()
+        content_type = resp.headers.get("Content-Type", "")
+        content_disposition = resp.headers.get("Content-Disposition", "")
 
     if len(raw) < 100_000:
         raise SystemExit(f"MAFRA village CSV unexpectedly small: {len(raw)} bytes")
@@ -75,10 +106,14 @@ def main() -> None:
         decoded = raw.decode("cp949")
     except UnicodeDecodeError as e:
         raise SystemExit(f"MAFRA village CSV is not valid cp949: {e}")
+
     lines = [x for x in decoded.splitlines() if x.strip()]
     actual_count = max(0, len(lines) - 1)
-    if actual_count != expected_count:
+    if not (3000 <= actual_count <= 5000):
+        raise SystemExit(f"Unexpected MAFRA village CSV row count: {actual_count}")
+    if expected_count is not None and actual_count != expected_count:
         raise SystemExit(f"MAFRA row-count mismatch: endpoint={expected_count}, csv={actual_count}")
+
     expected_header = "마을ID,마을명,기준년도,마을유형"
     if not decoded.startswith(expected_header):
         raise SystemExit("Unexpected MAFRA village CSV header")
@@ -97,6 +132,12 @@ def main() -> None:
         "snapshot_date": args.snapshot_date,
         "retrieved_at_utc": datetime.now(timezone.utc).isoformat(),
         "row_count": actual_count,
+        "count_endpoint_row_count": expected_count,
+        "count_endpoint_verified": expected_count is not None,
+        "count_endpoint_error": count_error,
+        "detail_attempts_used": detail_attempts,
+        "count_attempts_used": count_attempts,
+        "export_attempts_used": export_attempts,
         "encoding": "cp949",
         "bytes": len(raw),
         "sha256": sha256(raw),
