@@ -43,6 +43,26 @@ jobs:
           echo "path=$MASTER" >> "$GITHUB_OUTPUT"
           echo "Master: $MASTER"
 
+      - name: Compatibility patch and syntax check
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/build_region_pages_release_v2.py')
+          lines=p.read_text(encoding='utf-8').splitlines()
+          for i,line in enumerate(lines):
+              if "if p.get('latitude') and p.get('longitude'):z.append" in line:
+                  lines[i:i+1]=[
+                      "            if p.get('latitude') and p.get('longitude'):",
+                      "                lat=esc(p.get('latitude')); lon=esc(p.get('longitude'))",
+                      "                z.append(('좌표','<div class=\"coordinate\"><div><span>위도</span><strong>'+lat+'</strong></div><div><span>경도</span><strong>'+lon+'</strong></div></div>'))",
+                  ]
+                  break
+          p.write_text('\n'.join(lines)+'\n',encoding='utf-8')
+          PY
+          python -m py_compile scripts/build_region_pages_release_v2.py
+
       - name: Build 26,937 region pages
         shell: bash
         run: |
@@ -70,7 +90,7 @@ jobs:
           cp /tmp/region-site/manifest/qa.json /tmp/release/region-pages-qa.json
           sha256sum /tmp/release/region-pages.tar.gz | tee /tmp/release/region-pages.tar.gz.sha256
           python - <<'PY'
-          import json, os
+          import json
           from pathlib import Path
           q=json.loads(Path('/tmp/release/region-pages-qa.json').read_text())
           meta={
