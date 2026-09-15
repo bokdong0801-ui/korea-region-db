@@ -46,19 +46,35 @@ jobs:
           cat /tmp/mafra/normalized/village_unresolved_regions.csv
           echo '=== BAD IDS ==='
           cat /tmp/mafra/normalized/village_bad_ids.csv
-      - name: Exact 3306 of 3306 MAFRA CI gate
+      - name: Exact 3306 standard plus 15 official scope IDs CI gate
         run: |
           python - <<'PY'
           import json
+          from pathlib import Path
           r=json.load(open('/tmp/mafra/normalized/village_import_report.json',encoding='utf-8'))
-          expected=3306
-          assert r['unique_village_ids'] == expected, r
-          assert r['places'] == expected, r
-          assert r['relations'] == expected, r
+          standard=r['id_resolution_counts'].get('FIRST_10_DIGITS',0)
+          scope=r['id_resolution_counts'].get('EIGHT_DIGIT_SCOPE_PLUS_00',0)
+          assert standard == 3306, r
+          assert scope == 15, r
+          assert r['unique_village_ids'] == 3321, r
+          assert r['places'] == 3321, r
+          assert r['relations'] == 3321, r
           assert r['unresolved_regions'] == 0, r
           assert r['bad_ids'] == 0, r
           assert r['relations'] + r['unresolved_regions'] == r['places'], r
-          print(f"MAFRA EXACT CI PASS mapped={r['relations']}/{r['unique_village_ids']} unresolved={r['unresolved_regions']} bad_ids={r['bad_ids']}")
+          report={
+              'standard_ids_expected':3306,
+              'standard_ids_resolved':standard,
+              'official_8digit_scope_expected':15,
+              'official_8digit_scope_resolved':scope,
+              'total_expected':3321,
+              'total_resolved':r['relations'],
+              'unresolved_regions':r['unresolved_regions'],
+              'bad_ids':r['bad_ids'],
+              'status':'PASS'
+          }
+          Path('/tmp/mafra/normalized/village_exact_ci_report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+          print('MAFRA EXACT CI PASS',json.dumps(report,ensure_ascii=False))
           PY
       - name: Build V5 village overlay only after exact gate
         shell: bash
@@ -67,7 +83,7 @@ jobs:
             --v4-dir /tmp/v4/v4/master \
             --village-dir /tmp/mafra/normalized \
             --out-dir /tmp/v5/master
-      - name: Verify V5 master includes all 3306 MAFRA villages
+      - name: Verify V5 master includes every official MAFRA record
         shell: bash
         run: |
           python - <<'PY'
@@ -78,10 +94,11 @@ jobs:
           with p.open(encoding='utf-8-sig', newline='') as f:
               rows=list(csv.DictReader(f))
           villages=[r for r in rows if r.get('source_id') == 'mafra_rural_village_basic' and r.get('place_type') in {'RURAL_VILLAGE','RURAL_CENTER'}]
-          assert len(villages) == 3306, len(villages)
+          assert len(villages) == 3321, len(villages)
           report={
-              'expected_villages':3306,
-              'v5_mafra_villages':len(villages),
+              'standard_village_ids':3306,
+              'official_8digit_scope_ids':15,
+              'v5_mafra_entities':len(villages),
               'v5_total_places':len(rows),
               'status':'PASS'
           }
