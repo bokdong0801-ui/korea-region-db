@@ -42,16 +42,21 @@ jobs:
             --v4-places /tmp/v4/v4/master/places_geo_master.csv \
             --snapshot-date 2026-09-15 --out-dir /tmp/mafra/normalized
           cat /tmp/mafra/normalized/village_import_report.json
-      - name: MAFRA source quality gate
+          echo '=== UNRESOLVED REGIONS ==='
+          cat /tmp/mafra/normalized/village_unresolved_regions.csv
+          echo '=== BAD IDS ==='
+          cat /tmp/mafra/normalized/village_bad_ids.csv
+      - name: MAFRA source audit gate
         run: |
           python - <<'PY'
           import json
           r=json.load(open('/tmp/mafra/normalized/village_import_report.json',encoding='utf-8'))
           assert 3000 <= r['source_rows'] <= 5000, r
           assert r['unique_village_ids'] > 1000, r
-          assert r['bad_ids'] == 0, r
           assert r['relations'] + r['unresolved_regions'] == r['places'], r
-          print('MAFRA VILLAGE SOURCE QUALITY GATE PASS',r)
+          assert r['bad_ids'] <= 50, r
+          assert r['unresolved_regions'] <= 50, r
+          print('MAFRA VILLAGE AUDIT GATE PASS; exceptions require explicit resolution before overlay',r)
           PY
       - name: Overlay only when every village region resolves
         shell: bash
@@ -59,8 +64,8 @@ jobs:
           python - <<'PY'
           import json,sys
           r=json.load(open('/tmp/mafra/normalized/village_import_report.json',encoding='utf-8'))
-          if r['unresolved_regions']:
-              print('AUDIT_REQUIRED unresolved_regions=',r['unresolved_regions'])
+          if r['unresolved_regions'] or r['bad_ids']:
+              print('AUDIT_REQUIRED unresolved_regions=',r['unresolved_regions'],'bad_ids=',r['bad_ids'])
               sys.exit(2)
           PY
           python scripts/augment_geo_v5_villages.py \
