@@ -1,0 +1,33 @@
+name: Probe VWorld National Names API
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: mkdir -p /tmp/vworld-api
+      - name: Probe official VWorld national-name layer schema
+        env:
+          VWORLD_API_KEY: ${{ secrets.VWORLD_API_KEY }}
+        run: |
+          python scripts/probe_vworld_national_names_api.py \
+            --out-dir /tmp/vworld-api \
+            --bbox 126.7,37.3,127.3,37.8 \
+            --size 100
+      - name: Upload redacted schema audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vworld-national-names-api-schema-probe
+          path: /tmp/vworld-api/**
+          if-no-files-found: warn
+          retention-days: 30
