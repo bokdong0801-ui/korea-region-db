@@ -1,0 +1,85 @@
+name: Build Korea Region Search V1
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-region-search-v1.yml'
+      - 'scripts/build_region_search_v1.py'
+      - 'web/region-search-v1/**'
+
+jobs:
+  build-region-search-v1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Prepare directories
+        run: mkdir -p /tmp/v4 /tmp/site
+      - name: Download audited V4 artifact
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fL \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/10355006058/zip" \
+            -o /tmp/v4.zip
+          unzip -oq /tmp/v4.zip -d /tmp/v4
+          test -s /tmp/v4/v4/master/places_geo_master.csv
+          python - <<'PY'
+          import json
+          r=json.load(open('/tmp/v4/v4/master/geo_master_v4_report.json',encoding='utf-8'))
+          assert r['places']==65469 and r['relations']==124343 and r['unresolved_geo_relations']==0, r
+          print('AUDITED V4 INPUT PASS',r)
+          PY
+      - name: Copy site shell
+        run: cp -R web/region-search-v1/. /tmp/site/
+      - name: Build browser search data
+        run: |
+          python scripts/build_region_search_v1.py \
+            --geo-dir /tmp/v4/v4/master \
+            --site-dir /tmp/site \
+            --source-release V4
+      - name: Region Search V1 quality gate
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          root=pathlib.Path('/tmp/site')
+          meta=json.load(open(root/'data/meta.json',encoding='utf-8'))
+          idx=json.load(open(root/'data/search-index.json',encoding='utf-8'))
+          assert meta['places']==65469, meta
+          assert meta['relations']==124343, meta
+          assert meta['unresolved_relations']==0, meta
+          assert len(idx)==65469, len(idx)
+          assert sum(1 for x in idx if x['t']=='NEWTOWN')==22
+          assert sum(1 for x in idx if x['t']=='STATION')==1052
+          assert all((root/'data/details'/f'{i:03d}.json').exists() for i in range(128))
+          assert (root/'index.html').stat().st_size>500
+          assert (root/'place.html').stat().st_size>300
+          assert (root/'assets/app.js').stat().st_size>2000
+          print('REGION SEARCH V1 QUALITY GATE PASS',meta)
+          PY
+      - name: Package preview site
+        run: |
+          cd /tmp/site
+          zip -qr /tmp/korea-region-search-v1-20260915.zip .
+          sha256sum /tmp/korea-region-search-v1-20260915.zip | tee /tmp/REGION_SEARCH_V1_SHA256.txt
+          cp /tmp/REGION_SEARCH_V1_SHA256.txt /tmp/site/
+      - name: Upload Region Search V1 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: korea-region-search-v1-20260915
+          path: |
+            /tmp/site/**
+            /tmp/korea-region-search-v1-20260915.zip
+          if-no-files-found: error
+          retention-days: 90
